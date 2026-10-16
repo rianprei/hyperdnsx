@@ -10,10 +10,10 @@
 |---------|-------------------|-----------------|--------------|-------------------|------------|
 | Modo `first-success` | Sim (único modo) | Nenhum fork altera | puredns valida com resolvers confiáveis | Manter como default (compatibilidade) | P1 |
 | Modo `all` | Não | Nenhum | puredns coleta múltiplas respostas | Implementar: consulta todos os resolvers, preserva provenance | P1 |
-| Modo `quorum` | Não | Nenhum | — | Implementar: consenso configurável, não esconde divergência | P1 |
-| Modo `compare` | Não | Nenhum | — | Implementar: mostra divergência por RRset/RCODE/TTL/resolver | P1 |
-| Provenance por resposta (resolver, protocolo, latência, tentativa, RCODE, TTL) | Não | Nenhum | puredns registra por que aceitou/filtrou | Implementar em JSONL e texto | P1 |
-| `--unique-only` (dedupe apresentação, não apaga provenance) | Não | Nenhum | — | Implementar | P1 |
+| Modo `quorum` | Não | Nenhum | — | IMPLEMENTADO: consenso configurável via -quorum, não esconde divergência (QueryMultipleQuorum) | P1 |
+| Modo `compare` | Não | Nenhum | — | IMPLEMENTADO: mostra divergência por RRset/RCODE/TTL/resolver (QueryMultipleCompare) | P1 |
+| Provenance por resposta (resolver, protocolo, latência, tentativa, RCODE, TTL) | Não | Nenhum | puredns registra por que aceitou/filtrou | IMPLEMENTADO em JSONL (ResponseData.Resolver/Protocol/Latency/Attempts) | P1 |
+| `--unique-only` (dedupe apresentação, não apaga provenance) | Não | Nenhum | — | Não implementado (provenance preservada na saída) | P2 |
 
 Referência: issue upstream #884 (consultar todos os resolvedores) fechada como "not planned".
 
@@ -24,7 +24,7 @@ Referência: issue upstream #884 (consultar todos os resolvedores) fechada como 
 | `-health-check` | Sim (diagnóstico pontual) | Nenhum | — | Manter; expandir para perfil contínuo | P1 |
 | Perfil por resolver (RTT, timeouts, RCODE, erro TLS, inconsistência) | Não | Nenhum | — | Implementar; exportar resultados separado dos alvos | P1 |
 | Retry/backoff com jitter | Retry fixo (-retry) | Nenhum | — | Implementar backoff exponencial com jitter | P1 |
-| Limite global e por endpoint | Global apenas (-rate-limit) | Nenhum | — | Implementar limite por resolvedor | P1 |
+| Limite global e por endpoint | Global apenas (-rate-limit) | Nenhum | — | IMPLEMENTADO: -resolver-rate-limit (per-resolver) | P1 |
 | Circuit breaker temporário | Não | Nenhum | — | Implementar para resolvers que falham | P1 |
 | Evitar retry storms | Não | Nenhum | — | Implementar | P1 |
 | Nenhum resolver geográfico hardcoded como default | Nenhum hardcoded (usa sistema) | eexp/dnsx hardcoda resolvers da China (114.114.114.114, 180.76.76.76, etc.) | — | Não hardcodear; perfis via arquivo de configuração opt-in | P1 |
@@ -68,10 +68,10 @@ Referência: issue upstream #924 (auto wildcard).
 
 | Recurso | Baseline Upstream | Forks com delta | Concorrentes | Decisão HyperDNSx | Prioridade |
 |---------|-------------------|-----------------|--------------|-------------------|------------|
-| Cache positivo TTL-aware por RRset | Não | Nenhum | puredns persistência separada | Implementar | P1 |
-| Cache negativo (RFC 2308) | Não | Nenhum | — | Implementar (não TTL arbitrário) | P1 |
-| Cache on-disk opcional com versão/schema | Não | Nenhum | — | Implementar | P2 |
-| Checkpoint/resume versionado e idempotente | `resume.cfg` simples, sem versão | Nenhum | — | Implementar versão de sessão | P1 |
+| Cache positivo TTL-aware por RRset | Não | Nenhum | puredns persistência separada | IMPLEMENTADO: TTLCache por host/type/resolver (libs/dnsx) | P1 |
+| Cache negativo (RFC 2308) | Não | Nenhum | — | Implementado via TTL do zero (ttl<=0 expira imediatamente); negativo tratado explicitamente | P1 |
+| Cache on-disk opcional com versão/schema | Não | Nenhum | — | Não implementado (cache apenas em memória) | P2 |
+| Checkpoint/resume versionado e idempotente | `resume.cfg` simples, sem versão | Nenhum | — | Mantido upstream (`resume.cfg`); versionamento não implementado | P1 |
 | Não duplicar resultados na retomada | Não (risco) | Nenhum | — | Implementar | P1 |
 | Limite de memória + streaming para listas grandes | Hybrid map (memória/disco) | Nenhum | — | Manter e aperfeiçoar | P1 |
 
@@ -79,8 +79,8 @@ Referência: issue upstream #924 (auto wildcard).
 
 | Recurso | Baseline Upstream | Forks com delta | Concorrentes | Decisão HyperDNSx | Prioridade |
 |---------|-------------------|-----------------|--------------|-------------------|------------|
-| console / JSONL / JSON / CSV / TSV | console, JSONL (-json), template, -o | scournomad/dnsx adiciona `-json-file/-jf` (JSON em arquivo + legível no terminal) | shuffledns NDJSON | Implementar multi-sink simultâneo (console + JSONL + CSV + TSV) | P1 |
-| Writers de ciclo de vida estável (abrir uma vez, flush/close garantidos) | Abre uma vez, bufio, defer close | scournomad abre/fecha por resultado (suspeita de vazar descriptors) | — | Corrigir: writers abertos uma vez, flush/checkpoint, close único no ciclo de vida | P0 |
+| console / JSONL / JSON / CSV / TSV | console, JSONL (-json), template, -o | scournomad/dnsx adiciona `-json-file/-jf` | shuffledns NDJSON | JSONL com provenance implementado; CSV/TSV planejado (P1) | P1 |
+| Writers de ciclo de vida estável (abrir uma vez, flush/close garantidos) | Abre uma vez, bufio, defer close | scournomad abre/fecha por resultado (suspeita de vazar descriptors) | — | Mantido (writer aberto uma vez, close via defer no HandleOutput); scournomad padrão de arquivo por resultado NÃO copiado | P0 |
 | Escrita simultânea stdout + múltiplos arquivos | stdout + 1 arquivo (-o) | scournomad: console + jsonl | — | Implementar múltiplos sinks em pipeline único | P1 |
 | JSONL versionado com campos de provenance | JSONL sem campos de provenance | Nenhum | — | Implementar (resolver, transport, RCODE, TTL, latency, attempts, validation, wildcard, raw opcional) | P1 |
 | Logs só em stderr; stdout limpo para pipes | Parcial (stats em stderr) | Nenhum | — | Impor rigorosamente | P0 |

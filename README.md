@@ -1,508 +1,148 @@
-<h1 align="center">
-  <img src="static/dnsx-logo.png" alt="dnsx" width="200px">
-  <br>
-</h1>
+# HyperDNSx
 
-<h4 align="center">A fast and multi-purpose DNS toolkit designed for running DNS queries</h4>
+A fast, reliable, and auditable evolution of [`projectdiscovery/dnsx`](https://github.com/projectdiscovery/dnsx)
+for batch DNS queries, host resolution, subdomain brute-forcing, wildcard
+filtering, and custom resolver support. Built natively for Linux and
+**Android/Termux ARM64**, with measurable improvements over upstream:
+per-resolver provenance, resolver dispatch modes (`first-success`/`all`/
+`quorum`/`compare`), TTL-bounded cache, scope enforcement, dry-run, and
+per-resolver rate limiting.
 
-<p align="center">
-<a href="https://goreportcard.com/report/github.com/projectdiscovery/dnsx"><img src="https://goreportcard.com/badge/github.com/projectdiscovery/dnsx"></a>
-<a href="https://github.com/projectdiscovery/dnsx/issues"><img src="https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat"></a>
-<a href="https://github.com/projectdiscovery/dnsx/releases"><img src="https://img.shields.io/github/release/projectdiscovery/dnsx"></a>
-<a href="https://twitter.com/pdiscoveryio"><img src="https://img.shields.io/twitter/follow/pdiscoveryio.svg?logo=twitter"></a>
-<a href="https://discord.gg/projectdiscovery"><img src="https://img.shields.io/discord/695645237418131507.svg?logo=discord"></a>
-</p>
+> **Engineering goal:** be defensibly better than upstream where tests and
+> benchmarks demonstrate it. "Better" is not claimed as fact; it is claimed
+> only where reproducible evidence exists (see `docs/research/benchmark-results.md`).
 
-<p align="center">
-  <a href="#features">Features</a> •
-  <a href="#installation-instructions">Installation</a> •
-  <a href="#usage">Usage</a> •
-  <a href="#running-dnsx">Running `dnsx`</a> •
-  <a href="#wildcard-filtering">Wildcard</a> •
-  <a href="#-notes">Notes</a> •
-  <a href="https://discord.gg/projectdiscovery">Join Discord</a>
-</p>
+## Compatibility with upstream `dnsx`
 
+HyperDNSx preserves the upstream CLI flags, aliases, JSONL output, templates,
+stdin/stdout piping, wildcard, resume, and transport behavior
+(UDP/TCP/DoH/DoT). Existing `dnsx` pipelines keep working. The default mode is
+`first-success`, identical to upstream.
 
----
+**Differences from upstream are explicit and documented:**
+- `-resolver-mode {first-success,all,quorum,compare}` — new (upstream is
+  first-success only).
+- `-quorum N` — minimum votes for consensus in quorum mode.
+- `-resolver-rate-limit N` — per-resolver requests/second limit.
+- `-cache-enabled` / `-cache-ttl` — TTL-bounded answer cache.
+- `-dry-run` — show planned queries and estimates without sending DNS traffic.
+- `-scope-file PATH` — allowed DNS suffixes; out-of-scope candidates rejected
+  (suffix-spoofing safe).
+- JSONL output now includes `resolver`, `protocol`, `latency`, `attempts`, and
+  `unknown` (records of types not parsed by the underlying library, e.g.
+  DNSSEC/DANE collection).
+- DNSSEC/DANE record **collection** (`-dnskey`, `-ds`, `-rrsig`, `-nsec`,
+  `-nsec3`, `-tlsa`, `-sshfp`) — collection only, no cryptographic validation
+  claimed.
 
-`dnsx` is a fast and multi-purpose DNS toolkit designed for running various probes through the [retryabledns](https://github.com/projectdiscovery/retryabledns) library. It supports multiple DNS queries, user supplied resolvers, DNS wildcard filtering like [shuffledns](https://github.com/projectdiscovery/shuffledns) etc.
+## Installation
 
-
-# Features
-
-<h1 align="left">
-  <img src="https://github.com/projectdiscovery/dnsx/assets/8293321/73fe69a0-15b8-4b54-bacc-e201edd90103" alt="dnsx" width="700px"></a>
-  <br>
-</h1>
-
-
- - Simple and Handy utility to query DNS records.
- - **A, AAAA, CNAME, PTR, NS, MX, TXT, SRV, SOA** query support
- - DNS **Resolution** / **Brute-force** support
- - Custom **resolver** input support
- - Multiple resolver format **(TCP/UDP/DOH/DOT)** support
- - **stdin** and **stdout** support
- - Automatic **wildcard** handling support
-
-# Installation Instructions
-
-
-`dnsx` requires **go1.21** to install successfully. Run the following command to install the latest version: 
+HyperDNSx requires **Go 1.25+**. Build natively (no proot, chroot, glibc
+rootfs, Docker, or QEMU):
 
 ```sh
-go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@latest
+git clone https://github.com/projectdiscovery/dnsx  # or your fork
+cd dnsx
+go build -o hyperdnsx ./cmd/dnsx/
+./hyperdnsx -h
 ```
 
-# Usage
+Termux/Android ARM64: `go build` compiles natively on-device
+(`GOOS=android GOARCH=arm64`). See `docs/termux-android.md` for exact
+commands and evidence classification.
+
+## Quick start
+
+Resolve a list of hosts (upstream-compatible, first-success mode):
 
 ```sh
-dnsx -h
+echo "example.com" | ./hyperdnsx -silent -a
+example.com [A] [93.184.216.34]
 ```
 
-This will display help for the tool. Here are all the switches it supports.
+Query multiple record types with JSONL output:
 
-```console
-INPUT:
-   -l, -list string      list of sub(domains)/hosts to resolve (file or stdin)
-   -d, -domain string    list of domain to bruteforce (file or comma separated or stdin)
-   -w, -wordlist string  list of words to bruteforce (file or comma separated or stdin)
-
-QUERY:
-   -a                       query A record (default)
-   -aaaa                    query AAAA record
-   -cname                   query CNAME record
-   -ns                      query NS record
-   -txt                     query TXT record
-   -srv                     query SRV record
-   -ptr                     query PTR record
-   -mx                      query MX record
-   -soa                     query SOA record
-   -any                     query ANY record
-   -axfr                    query AXFR
-   -caa                     query CAA record
-   -recon                   query all the dns records (a,aaaa,cname,ns,txt,srv,ptr,mx,soa,axfr,caa)
-   -e, -exclude-type value  dns query type to exclude (a,aaaa,cname,ns,txt,srv,ptr,mx,soa,axfr,caa) (default none)
-
-FILTER:
-   -re, -resp          display dns response
-   -ro, -resp-only     display dns response only
-   -rc, -rcode string  filter result by dns status code (eg. -rcode noerror,servfail,refused)
-
-PROBE:
-   -cdn  display cdn name
-   -asn  display host asn information
-
-RATE-LIMIT:
-   -t, -threads int      number of concurrent threads to use (default 100)
-   -rl, -rate-limit int  number of dns request/second to make (disabled as default) (default -1)
-
-UPDATE:
-   -up, -update                 update dnsx to latest version
-   -duc, -disable-update-check  disable automatic dnsx update check
-
-OUTPUT:
-   -o, -output string           file to write output
-   -j, -json                    write output in JSONL(ines) format
-   -omit-raw, -or               omit raw dns response from jsonl output
-   -ot, -output-template string custom output template (e.g. -ot '{{host}} {{a}}')
-
-DEBUG:
-   -hc, -health-check  run diagnostic check up
-   -silent             display only results in the output
-   -v, -verbose        display verbose output
-   -raw, -debug        display raw dns response
-   -stats              display stats of the running scan
-   -version            display version of dnsx
-   -nc, -no-color      disable color in output
-
-OPTIMIZATION:
-   -retry int                number of dns attempts to make (must be at least 1) (default 2)
-   -hf, -hostsfile           use system host file
-   -trace                    perform dns tracing
-   -trace-max-recursion int  Max recursion for dns trace (default 32767)
-   -resume                   resume existing scan
-   -stream                   stream mode (wordlist, wildcard, stats and stop/resume will be disabled)
-   -timeout value            maximum time to wait for a DNS query to complete (default 3s)
-
-CONFIGURATIONS:
-   -auth                         configure projectdiscovery cloud (pdcp) api key (default true)
-   -r, -resolver string          list of resolvers to use (file or comma separated)
-   -wt, -wildcard-threshold int  wildcard filter threshold (default 5)
-   -auto-wildcard                automatically detect wildcard domains for filtering
-   -wd, -wildcard-domain string  domain name for manual wildcard filtering (mutually exclusive with -auto-wildcard; other flags will be ignored - json output recommended)
+```sh
+echo "example.com" | ./hyperdnsx -silent -json -a -aaaa -cname -mx -ns
 ```
 
-## Running dnsx
+Use custom resolvers:
 
-### DNS Resolving
-
-Filter active hostnames from the list of passive subdomains, obtained from various sources:
-
-```console
-subfinder -silent -d hackerone.com | dnsx -silent
-
-a.ns.hackerone.com
-www.hackerone.com
-api.hackerone.com
-docs.hackerone.com
-mta-sts.managed.hackerone.com
-mta-sts.hackerone.com
-resources.hackerone.com
-b.ns.hackerone.com
-mta-sts.forwarding.hackerone.com
-events.hackerone.com
-support.hackerone.com
+```sh
+./hyperdnsx -l hosts.txt -r 1.1.1.1,8.8.8.8 -a -silent
 ```
 
-Print **A** records for the given list of subdomains:
+Query every configured resolver and keep per-resolver provenance (issue #884):
 
-```console
-subfinder -silent -d hackerone.com | dnsx -silent -a -resp
-
-www.hackerone.com [104.16.100.52]
-www.hackerone.com [104.16.99.52]
-hackerone.com [104.16.99.52]
-hackerone.com [104.16.100.52]
-api.hackerone.com [104.16.99.52]
-api.hackerone.com [104.16.100.52]
-mta-sts.forwarding.hackerone.com [185.199.108.153]
-mta-sts.forwarding.hackerone.com [185.199.109.153]
-mta-sts.forwarding.hackerone.com [185.199.110.153]
-mta-sts.forwarding.hackerone.com [185.199.111.153]
-a.ns.hackerone.com [162.159.0.31]
-resources.hackerone.com [52.60.160.16]
-resources.hackerone.com [3.98.63.202]
-resources.hackerone.com [52.60.165.183]
-resources.hackerone.com [read.uberflip.com]
-mta-sts.hackerone.com [185.199.110.153]
-mta-sts.hackerone.com [185.199.111.153]
-mta-sts.hackerone.com [185.199.109.153]
-mta-sts.hackerone.com [185.199.108.153]
-gslink.hackerone.com [13.35.210.17]
-gslink.hackerone.com [13.35.210.38]
-gslink.hackerone.com [13.35.210.83]
-gslink.hackerone.com [13.35.210.19]
-b.ns.hackerone.com [162.159.1.31]
-docs.hackerone.com [185.199.109.153]
-docs.hackerone.com [185.199.110.153]
-docs.hackerone.com [185.199.111.153]
-docs.hackerone.com [185.199.108.153]
-support.hackerone.com [104.16.51.111]
-support.hackerone.com [104.16.53.111]
-mta-sts.managed.hackerone.com [185.199.108.153]
-mta-sts.managed.hackerone.com [185.199.109.153]
-mta-sts.managed.hackerone.com [185.199.110.153]
-mta-sts.managed.hackerone.com [185.199.111.153]
+```sh
+./hyperdnsx -l hosts.txt -r 1.1.1.1,8.8.8.8,9.9.9.9 \
+  -resolver-mode all -a -json -silent
 ```
 
-Extract **A** records for the given list of subdomains:
+Consensus across resolvers (quorum, majority by default):
 
-```console
-subfinder -silent -d hackerone.com | dnsx -silent -a -resp-only
-
-104.16.99.52
-104.16.100.52
-162.159.1.31
-104.16.99.52
-104.16.100.52
-185.199.110.153
-185.199.111.153
-185.199.108.153
-185.199.109.153
-104.16.99.52
-104.16.100.52
-104.16.51.111
-104.16.53.111
-185.199.108.153
-185.199.111.153
-185.199.110.153
-185.199.111.153
+```sh
+./hyperdnsx -l hosts.txt -r 1.1.1.1,8.8.8.8 -resolver-mode quorum -quorum 2 -a -json -silent
 ```
 
-Extract **CNAME** records for the given list of subdomains:
+Show every answer and flag divergences between resolvers:
 
-```console
-subfinder -silent -d hackerone.com | dnsx -silent -cname -resp
-
-support.hackerone.com [hackerone.zendesk.com]
-resources.hackerone.com [read.uberflip.com]
-mta-sts.hackerone.com [hacker0x01.github.io]
-mta-sts.forwarding.hackerone.com [hacker0x01.github.io]
-events.hackerone.com [whitelabel.bigmarker.com]
-```
-Extract **ASN** records for the given list of subdomains:
-```console
-subfinder -silent -d hackerone.com | dnsx -silent  -asn
-
-b.ns.hackerone.com [AS13335, CLOUDFLARENET, US]
-a.ns.hackerone.com [AS13335, CLOUDFLARENET, US]
-hackerone.com [AS13335, CLOUDFLARENET, US]
-www.hackerone.com [AS13335, CLOUDFLARENET, US]
-api.hackerone.com [AS13335, CLOUDFLARENET, US]
-support.hackerone.com [AS13335, CLOUDFLARENET, US]
+```sh
+./hyperdnsx -l hosts.txt -r 1.1.1.1,8.8.8.8 -resolver-mode compare -a -json -silent
 ```
 
-Probe using [dns status code](https://github.com/projectdiscovery/dnsx/wiki/RCODE-ID-VALUE-Mapping) on given list of (sub)domains:
+Dry-run (no DNS traffic sent):
 
-```console
-subfinder -silent -d hackerone.com | dnsx -silent -rcode noerror,servfail,refused
-
-ns.hackerone.com [NOERROR]
-a.ns.hackerone.com [NOERROR]
-b.ns.hackerone.com [NOERROR]
-support.hackerone.com [NOERROR]
-resources.hackerone.com [NOERROR]
-mta-sts.hackerone.com [NOERROR]
-www.hackerone.com [NOERROR]
-mta-sts.forwarding.hackerone.com [NOERROR]
-docs.hackerone.com [NOERROR]
+```sh
+./hyperdnsx -l hosts.txt -d -w wordlist.txt -r 1.1.1.1 -dry-run
 ```
 
-Extract subdomains from given network range using `PTR` query:
+Enforce a scope (suffix-spoofing safe):
 
-```console
-echo 173.0.84.0/24 | dnsx -silent -resp-only -ptr
-
-cors.api.paypal.com
-trinityadminauth.paypal.com
-cld-edge-origin-api.paypal.com
-appmanagement.paypal.com
-svcs.paypal.com
-trinitypie-serv.paypal.com
-ppn.paypal.com
-pointofsale-new.paypal.com
-pointofsale.paypal.com
-slc-a-origin-pointofsale.paypal.com
-fpdbs.paypal.com
+```sh
+echo "scope.example.com" > scope.txt
+./hyperdnsx -l candidates.txt -scope-file scope.txt -a -silent
 ```
 
-Extract subdomains from given ASN using `PTR` query:
-```console
-echo AS17012 | dnsx -silent -resp-only -ptr 
+## Features
 
-apiagw-a.paypal.com
-notify.paypal.com
-adnormserv-slc-a.paypal.com
-a.sandbox.paypal.com
-apps2.paypal-labs.com
-pilot-payflowpro.paypal.com
-www.paypallabs.com
-paypal-portal.com
-micropayments.paypal-labs.com
-minicart.paypal-labs.com
-```
----------
+- Batch DNS queries (A, AAAA, CNAME, PTR, NS, MX, TXT, SRV, SOA, CAA, ANY,
+  AXFR) plus DNSSEC/DANE collection (DNSKEY, DS, RRSIG, NSEC, NSEC3, TLSA,
+  SSHFP).
+- DNS resolution and subdomain brute-forcing (`-d`/`-domain` + `-w`/`-wordlist`).
+- Custom resolver input (`-r`/`-resolver`, file or comma-separated).
+- Multiple resolver transports (UDP/TCP/DoH/DoT via retryabledns).
+- stdin/stdout support for Unix pipelines.
+- Automatic wildcard handling (`-auto-wildcard`/`-aw`, `-wildcard-domain`/`-wd`).
+- Resolver dispatch modes: `first-success` (default, upstream-compatible),
+  `all`, `quorum`, `compare`.
+- Per-resolver provenance (resolver, protocol, latency, attempts) in JSONL.
+- TTL-bounded answer cache (`-cache-enabled`, `-cache-ttl`).
+- Scope enforcement (`-scope-file`), dry-run (`-dry-run`),
+  per-resolver rate limit (`-resolver-rate-limit`).
+- Importable Go library (`libs/dnsx`).
 
-### Custom Output Format
+## Research documents
 
-The `-output-template` (`-ot`) flag lets you customize the output format using a template, instead of the default bracketed layout (e.g. `example.com [A] [104.20.23.154]`). You specify the template directly on the command line to control how the resolved data is presented.
+| Document | Contents |
+|----------|----------|
+| `docs/research/upstream-baseline.md` | Functional baseline extracted from upstream code |
+| `docs/research/gap-matrix.md` | Gaps vs. upstream and forks, with decisions |
+| `docs/research/forks.tsv` | 356 direct forks catalogued |
+| `docs/research/fork-compare.jsonl` | Comparison of every fork vs. upstream |
+| `docs/research/fork-feature-matrix.md` | Functional deltas, adopted / not adopted |
+| `docs/research/fork-audit-summary.md` | Audit summary and UNVERIFIED forks |
+| `docs/research/benchmark-results.md` | Reproducible benchmarks (local fixtures only) |
+| `docs/research/dependency-audit.md` | Dependencies, licenses, tool availability |
+| `docs/termux-android.md` | Native Termux/ARM64 build & execution evidence |
 
-Template variables map to the same field names used in the JSONL output (`-json`), so any of the following can be referenced as `{{field}}`:
+## License
 
-`host`, `a`, `aaaa`, `cname`, `ns`, `txt`, `mx`, `srv`, `ptr`, `soa`, `caa`, `ttl`, `resolver`, `status_code`, `cdn-name`, `cdn-type`, `asn`, `query-time`. A convenience `{{ip}}` alias holds the combined `A` and `AAAA` records.
+MIT. See `LICENSE.md`. Upstream `dnsx` is MIT; copyright and notices are
+preserved. No GPL-3.0 code (puredns, shuffledns, MassDNS) was copied — only
+publicly described ideas were reimplemented independently.
 
-Records with multiple values (e.g. several `A` records) are comma-joined within a single field.
+## Security
 
-```console
-echo example.com | dnsx -silent -a -ot '{{host}} {{a}}'
-
-example.com 104.20.23.154,172.66.147.243
-```
-
-```console
-echo example.com | dnsx -silent -a -ot '{{ip}} - {{host}}'
-
-104.20.23.154,172.66.147.243 - example.com
-```
-
-> [!NOTE]
-> If a specified field does not exist or does not contain a value, it is simply omitted from the output. `-output-template` cannot be combined with `-json` or `-raw`.
-
----------
-
-### DNS Bruteforce
-
-Bruteforce subdomains for given domain or list of domains using `d` and `w` flag:
-
-```console
-dnsx -silent -d facebook.com -w dns_worldlist.txt
-
-blog.facebook.com
-booking.facebook.com
-api.facebook.com
-analytics.facebook.com
-beta.facebook.com
-apollo.facebook.com
-ads.facebook.com
-box.facebook.com
-alpha.facebook.com
-apps.facebook.com
-connect.facebook.com
-c.facebook.com
-careers.facebook.com
-code.facebook.com
-```
-
-Bruteforce targeted subdomain using single or multiple keyword input, as `d` or `w` flag supports file or comma separated keyword inputs:
-
-```console
-dnsx -silent -d domains.txt -w jira,grafana,jenkins
-
-grafana.1688.com
-grafana.8x8.vc
-grafana.airmap.com
-grafana.aerius.nl
-jenkins.1688.com
-jenkins.airbnb.app
-jenkins.airmap.com
-jenkins.ahn.nl
-jenkins.achmea.nl
-jira.amocrm.com
-jira.amexgbt.com
-jira.amitree.com
-jira.arrival.com
-jira.atlassian.net
-jira.atlassian.com
-```
-
-Values are accepted from **stdin** for all the input types (`-list`, `-domain`, `-wordlist`). The `-list` flag defaults to `stdin`, but the same can be achieved for other input types by adding a `-` (dash) as parameter:
-
-```console
-cat domains.txt | dnsx -silent -w jira,grafana,jenkins -d -
-
-grafana.1688.com
-grafana.8x8.vc
-grafana.airmap.com
-grafana.aerius.nl
-jenkins.1688.com
-jenkins.airbnb.app
-jenkins.airmap.com
-jenkins.ahn.nl
-jenkins.achmea.nl
-jira.amocrm.com
-jira.amexgbt.com
-jira.amitree.com
-jira.arrival.com
-jira.atlassian.net
-jira.atlassian.com
-```
-
-#### DNS Bruteforce with Placeholder based wordlist
-
-```bash
-$ cat tld.txt
-
-com
-by
-de
-be
-al
-bi
-cg
-dj
-bs
-```
-
-```console
-dnsx -d google.FUZZ -w tld.txt -resp
-
-      _             __  __
-   __| | _ __   ___ \ \/ /
-  / _' || '_ \ / __| \  / 
- | (_| || | | |\__ \ /  \ 
-  \__,_||_| |_||___//_/\_\ v1.1.2
-
-      projectdiscovery.io
-
-google.de [142.250.194.99] 
-google.com [142.250.76.206] 
-google.be [172.217.27.163] 
-google.bs [142.251.42.35] 
-google.bi [216.58.196.67] 
-google.al [216.58.196.68] 
-google.by [142.250.195.4] 
-google.cg [142.250.183.131] 
-google.dj [142.250.192.3] 
-```
-
-### Wildcard filtering
-
-A special feature of `dnsx` is its ability to handle **multi-level DNS based wildcards**, and do it so with a very reduced number of DNS requests. Sometimes all the subdomains will resolve, which leads to lots of garbage in the output. The way `dnsx` handles this is by keeping track of how many subdomains point to an IP and if the count of the subdomains increase beyond a certain threshold, it will check for wildcards on all the levels of the hosts for that IP iteratively.
-
-```console
-dnsx -l subdomain_list.txt -wd airbnb.com -o output.txt
-```
-
-To detect and filter wildcard DNS automatically across multiple domains in a single run while preserving the selected output mode:
-
-```console
-dnsx -l subdomain_list.txt -auto-wildcard -o output.txt
-```
-
-`-auto-wildcard` and `-wd` / `-wildcard-domain` are mutually exclusive. Use `-wd` when you want the existing manual single-domain wildcard filtering flow; use `-auto-wildcard` when you want dnsx to detect wildcard roots automatically across mixed-domain input.
-
----
-
-### Dnsx as a library
-
-It's possible to use the library directly in your golang programs. The following code snippets is an example of use in golang programs. Please refer to [here](https://pkg.go.dev/github.com/projectdiscovery/dnsx@v1.1.0/libs/dnsx) for detailed package configuration and usage.
-
-```go
-package main
-
-import (
-	"fmt"
-
-	"github.com/projectdiscovery/dnsx/libs/dnsx"
-)
-
-func main() {
-	// Create DNS Resolver with default options
-	dnsClient, err := dnsx.New(dnsx.DefaultOptions)
-	if err != nil {
-		fmt.Printf("err: %v\n", err)
-		return
-	}
-
-	// DNS A question and returns corresponding IPs
-	result, err := dnsClient.Lookup("hackerone.com")
-	if err != nil {
-		fmt.Printf("err: %v\n", err)
-		return
-	}
-	for idx, msg := range result {
-		fmt.Printf("%d: %s\n", idx+1, msg)
-	}
-
-	// Query
-	rawResp, err := dnsClient.QueryOne("hackerone.com")
-	if err != nil {
-		fmt.Printf("err: %v\n", err)
-		return
-	}
-	fmt.Printf("rawResp: %v\n", rawResp)
-
-	jsonStr, err := rawResp.JSON()
-	if err != nil {
-		fmt.Printf("err: %v\n", err)
-		return
-	}
-	fmt.Println(jsonStr)
-
-	return
-}
-```
-
-# 📋 Notes
-
-- As default, `dnsx` checks for **A** record.
-- As default `dnsx` uses Google, Cloudflare, Quad9 [resolver](https://github.com/projectdiscovery/dnsx/blob/43af78839e237ea8cbafe571df1ab0d6cbe7f445/libs/dnsx/dnsx.go#L31).
-- Custom resolver list can be loaded using the `r` flag.
-- `-auto-wildcard` automatically detects wildcard domains across multiple registrable roots in a single run.
-- Domain name (`-wd`) is required only for manual wildcard filtering and can not be used together with `-auto-wildcard`.
-- When using manual wildcard filtering with `-wd`, other DNS record flags are ignored and JSON output is recommended.
-- DNS resolution (`l`) and DNS brute-forcing (`w`) can't be used together.
-- VPN operators tend to filter high DNS/UDP traffic, therefore the tool might experience packets loss (eg. [Mullvad VPN](https://github.com/projectdiscovery/dnsx/issues/221)). Check [this potential solution](./MULLVAD.md).
-
-`dnsx` is made with 🖤 by the [projectdiscovery](https://projectdiscovery.io) team.
+No secrets are hardcoded or logged. No telemetry or cloud authentication is
+sent by default. TLS validation is not disabled. See `SECURITY.md`.
