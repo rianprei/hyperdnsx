@@ -1,0 +1,27 @@
+name: 🧪 Functional Test
+
+on:
+  pull_request:
+    paths:
+      - '**.go'
+      - '**.mod'
+  workflow_dispatch:
+
+jobs:
+  functional:
+    name: Functional Test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macOS-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: projectdiscovery/actions/setup/go@v1
+
+      - name: Functional Tests
+        run: |
+          chmod +x run.sh
+          bash run.sh ${{ matrix.os }}
+        env:
+          PDCP_API_KEY: "${{ secrets.PDCP_API_KEY }}"
+        working-directory: cmd/functional-test
