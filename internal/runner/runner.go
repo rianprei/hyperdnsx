@@ -84,6 +84,18 @@ func New(options *Options) (*Runner, error) {
 		options.resolverMode = dnsx.ResolverModeFirstSuccess
 	}
 
+	// Effective quorum: explicit value, or majority of configured resolvers.
+	numResolvers := len(options.Resolvers)
+	if numResolvers == 0 {
+		numResolvers = len(dnsx.DefaultResolvers)
+	}
+	if options.Quorum > 0 {
+		options.quorum = options.Quorum
+	} else {
+		// Majority quorum: ceil(n/2). For 1 resolver, quorum is 1.
+		options.quorum = numResolvers/2 + 1
+	}
+
 	retryabledns.CheckInternalIPs = true
 
 	dnsxOptions := dnsx.DefaultOptions
@@ -670,8 +682,9 @@ func (r *Runner) worker() {
 		}
 		r.limiter.Take()
 		// Resolve according to the selected resolver mode. first-success keeps a
-		// single answer (historical behavior); all/quorum/compare return one
-		// answer per resolver, each carrying provenance.
+		// single answer (historical behavior); all returns one answer per
+		// resolver; quorum/classify answers by consensus; compare lists every
+		// answer with provenance and structured divergences.
 		queryStart := time.Now()
 		var queryErr error
 		var answers []*dnsx.ResponseData
@@ -684,8 +697,30 @@ func (r *Runner) worker() {
 			if single != nil {
 				answers = append(answers, &dnsx.ResponseData{DNSData: single})
 			}
-		case dnsx.ResolverModeAll, dnsx.ResolverModeQuorum, dnsx.ResolverModeCompare:
+		case dnsx.ResolverModeAll:
 			answers, queryErr = r.dnsx.QueryMultipleAll(domain)
+		case dnsx.ResolverModeQuorum:
+			qr, err := r.dnsx.QueryMultipleQuorum(domain, r.options.quorum)
+			if err != nil {
+				queryErr = err
+			}
+			if qr != nil {
+				answers = qr.AllAnswers
+			}
+			qt := time.Since(queryStart).Round(time.Millisecond).String()
+			r.outputQuorumResult(domain, qr, qt)
+			continue
+		case dnsx.ResolverModeCompare:
+			cr, err := r.dnsx.QueryMultipleCompare(domain)
+			if err != nil {
+				queryErr = err
+			}
+			if cr != nil {
+				answers = cr.AllAnswers
+			}
+			qt := time.Since(queryStart).Round(time.Millisecond).String()
+			r.outputCompareResult(domain, cr, qt)
+			continue
 		}
 		queryTime := time.Since(queryStart).Round(time.Millisecond).String()
 		for i := range answers {
@@ -916,6 +951,58 @@ func (r *Runner) worker() {
 			}
 		}
 	}
+}
+
+// outputQuorumResult emits a single structured JSONL line for a quorum query,
+// containing the consensus outcome, vote counts and all per-resolver answers.
+func (r *Runner) outputQuorumResult(domain string, qr *dnsx.QuorumResult, queryTime string) {
+	if qr == nil {
+		return
+	}
+	out := map[string]interface{}{
+		"host":                domain,
+		"mode":                "quorum",
+		"query-time":          queryTime,
+		"consensus_reached":   qr.ConsensusReached,
+		"consensus_signature": qr.ConsensusSignature,
+		"quorum_required":     qr.QuorumRequired,
+		"total_voters":        qr.TotalVoters,
+		"vote_counts":         qr.VoteCounts,
+	}
+	if qr.ConsensusAnswer != nil {
+		out["consensus_answer"] = qr.ConsensusAnswer
+	}
+	out["all_answers"] = qr.AllAnswers
+	js, err := json.Marshal(out)
+	if err != nil {
+		gologger.Debug().Msgf("quorum marshal error for %s: %v", domain, err)
+		return
+	}
+	r.outputchan <- string(js)
+}
+
+// outputCompareResult emits a single structured JSONL line for a compare query,
+// containing all per-resolver answers and structured divergences.
+func (r *Runner) outputCompareResult(domain string, cr *dnsx.CompareResult, queryTime string) {
+	if cr == nil {
+		return
+	}
+	out := map[string]interface{}{
+		"host":                 domain,
+		"mode":                 "compare",
+		"query-time":           queryTime,
+		"total_resolvers":      cr.TotalResolvers,
+		"successful_resolvers": cr.SuccessfulResolvers,
+		"failed_resolvers":     cr.FailedResolvers,
+		"divergences":          cr.Divergences,
+		"all_answers":          cr.AllAnswers,
+	}
+	js, err := json.Marshal(out)
+	if err != nil {
+		gologger.Debug().Msgf("compare marshal error for %s: %v", domain, err)
+		return
+	}
+	r.outputchan <- string(js)
 }
 
 func (r *Runner) outputRecordType(domain string, items interface{}, queryType, cdnName string, asn *dnsx.AsnResponse) {

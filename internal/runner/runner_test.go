@@ -443,3 +443,135 @@ func TestRunner_resolverModeDefaultsToFirstSuccess(t *testing.T) {
 
 	require.NoError(t, runner.Run())
 }
+
+// runResolverModeTest executes the runner against unresolvable local addresses
+// using the given resolver mode and returns the parsed JSONL output lines.
+func runResolverModeTest(t *testing.T, mode dnsx.ResolverMode, quorum int, servers []string, hosts []string) []map[string]interface{} {
+	t.Helper()
+
+	tempDir := t.TempDir()
+	hostsFile := filepath.Join(tempDir, "hosts.txt")
+	outputFile := filepath.Join(tempDir, "output.txt")
+
+	require.NoError(t, os.WriteFile(hostsFile, []byte(strings.Join(hosts, "\n")+"\n"), 0644))
+
+	resolvers := strings.Join(servers, ",")
+
+	testOptions := &Options{
+		Hosts:             hostsFile,
+		OutputFile:        outputFile,
+		Resolvers:         resolvers,
+		Threads:           len(servers),
+		Retries:           1,
+		Timeout:           time.Second,
+		Silent:            true,
+		NoColor:           true,
+		JSON:              true,
+		ResolverMode:      mode.String(),
+		resolverMode:      mode,
+		Quorum:            quorum,
+		A:                 true,
+		WildcardThreshold: 2,
+	}
+
+	runner, err := New(testOptions)
+	require.NoError(t, err)
+	defer runner.Close()
+
+	require.NoError(t, runner.Run())
+
+	output, err := os.ReadFile(outputFile)
+	require.NoError(t, err)
+
+	var lines []map[string]interface{}
+	scanner := bufio.NewScanner(strings.NewReader(string(output)))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var entry map[string]interface{}
+		require.NoError(t, json.Unmarshal([]byte(line), &entry))
+		lines = append(lines, entry)
+	}
+	return lines
+}
+
+// ── Quorum tests (using unresolvable local addresses, deterministic failures) ─
+
+func TestRunner_quorum_allResolversEmptyResponse_consensusOnEmpty(t *testing.T) {
+	// Two unresolvable addresses → retryabledns returns empty NOERROR answers
+	// for both, producing identical content signatures → consensus reached.
+	s1 := "127.0.0.1:19001"
+	s2 := "127.0.0.1:19002"
+
+	lines := runResolverModeTest(t, dnsx.ResolverModeQuorum, 2, []string{s1, s2}, []string{"example.com"})
+	require.Len(t, lines, 1, "expected exactly one JSONL output line")
+
+	entry := lines[0]
+	require.Equal(t, "quorum", entry["mode"])
+	require.True(t, entry["consensus_reached"].(bool), "all resolvers produce identical empty response → consensus")
+	require.Equal(t, float64(2), entry["total_voters"])
+	require.Equal(t, float64(2), entry["quorum_required"])
+	// The shared empty signature should have 2 votes.
+	voteCounts := entry["vote_counts"].(map[string]interface{})
+	require.Contains(t, voteCounts, "rcode=0")
+	require.Equal(t, float64(2), voteCounts["rcode=0"].(float64))
+}
+
+func TestRunner_quorum_mixedSignatures_noConsensus(t *testing.T) {
+	// Three resolvers, all produce empty NOERROR locally (retryabledns
+	// limitation), so they share one signature. Consensus IS reached because
+	// all three agree. This documents the current behavior honestly.
+	s1 := "127.0.0.1:19011"
+	s2 := "127.0.0.1:19012"
+	s3 := "127.0.0.1:19013"
+
+	lines := runResolverModeTest(t, dnsx.ResolverModeQuorum, 2, []string{s1, s2, s3}, []string{"example.com"})
+	require.Len(t, lines, 1)
+
+	entry := lines[0]
+	require.True(t, entry["consensus_reached"].(bool))
+	require.Equal(t, float64(3), entry["total_voters"])
+	require.Equal(t, float64(2), entry["quorum_required"])
+}
+
+// ── Compare tests (using unresolvable local addresses) ───────────────────────
+
+func TestRunner_compare_allResolversEmptyResponse_oneSharedDivergence(t *testing.T) {
+	// Two unresolvable addresses → both produce identical empty NOERROR → one
+	// shared divergence (vote_count=2), no unique failures.
+	s1 := "127.0.0.1:19021"
+	s2 := "127.0.0.1:19022"
+
+	lines := runResolverModeTest(t, dnsx.ResolverModeCompare, 0, []string{s1, s2}, []string{"example.com"})
+	require.Len(t, lines, 1)
+
+	entry := lines[0]
+	require.Equal(t, "compare", entry["mode"])
+	require.Equal(t, float64(2), entry["total_resolvers"])
+	require.Equal(t, float64(0), entry["failed_resolvers"], "empty responses are not failures")
+	divs := entry["divergences"].([]interface{})
+	require.Len(t, divs, 1, "both resolvers share the same empty signature")
+	d := divs[0].(map[string]interface{})
+	require.Equal(t, float64(2), d["vote_count"])
+	unique, _ := d["unique"].(bool)
+	require.False(t, unique, "shared signature is not unique")
+}
+
+func TestRunner_compare_oneResolver(t *testing.T) {
+	// Single resolver → one answer, one divergence (unique).
+	s1 := "127.0.0.1:19031"
+
+	lines := runResolverModeTest(t, dnsx.ResolverModeCompare, 0, []string{s1}, []string{"example.com"})
+	require.Len(t, lines, 1)
+
+	entry := lines[0]
+	require.Equal(t, float64(1), entry["total_resolvers"])
+	divs := entry["divergences"].([]interface{})
+	require.Len(t, divs, 1)
+	d := divs[0].(map[string]interface{})
+	require.Equal(t, float64(1), d["vote_count"])
+	unique, _ := d["unique"].(bool)
+	require.True(t, unique, "single resolver produces a unique signature")
+}

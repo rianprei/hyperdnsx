@@ -86,6 +86,8 @@ type Options struct {
 	Proxy                 string
 	ResolverMode          string
 	resolverMode          dnsx.ResolverMode
+	Quorum                int
+	quorum                int
 }
 
 // ShouldLoadResume resume file
@@ -196,6 +198,7 @@ func ParseOptions() *Options {
 		flagSet.DynamicVar(&options.PdcpAuth, "auth", "true", "configure ProjectDiscovery Cloud Platform (PDCP) api key"),
 		flagSet.StringVarP(&options.Resolvers, "resolver", "r", "", "list of resolvers to use (file or comma separated)"),
 		flagSet.StringVarP(&options.ResolverMode, "resolver-mode", "", "", "resolver dispatch mode: first-success (default), all, quorum, compare"),
+		flagSet.IntVarP(&options.Quorum, "quorum", "", 0, "minimum votes for consensus in quorum mode (0 = majority of resolvers)"),
 		flagSet.IntVarP(&options.WildcardThreshold, "wildcard-threshold", "wt", 5, "wildcard filter threshold"),
 		flagSet.BoolVar(&options.AutoWildcard, "auto-wildcard", false, "automatically detect wildcard domains for filtering"),
 		flagSet.StringVarP(&options.WildcardDomain, "wildcard-domain", "wd", "", "domain name for manual wildcard filtering (mutually exclusive with -auto-wildcard; other flags will be ignored - json output recommended)"),

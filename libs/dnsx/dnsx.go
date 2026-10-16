@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -307,6 +308,219 @@ func (d *DNSX) QueryMultipleAll(hostname string) ([]*ResponseData, error) {
 
 	wg.Wait()
 	return results, nil
+}
+
+// contentSignature normalizes a DNS answer into a deterministic signature for
+// quorum/compare grouping. It ignores TTL (per DNSSEC guidance: different TTLs
+// alone are not content divergence) and record ordering, but considers names,
+// types and values. Returns the signature string and whether the answer is
+// "empty" (NOERROR with no records).
+func contentSignature(data *retryabledns.DNSData) (string, bool) {
+	// Build a stable representation of all non-empty record sets.
+	type rrSet struct {
+		typ    string
+		values []string
+	}
+	var sets []rrSet
+
+	addSet := func(typ string, vals []string) {
+		if len(vals) == 0 {
+			return
+		}
+		sorted := append([]string(nil), vals...)
+		sort.Strings(sorted)
+		sets = append(sets, rrSet{typ: typ, values: sorted})
+	}
+
+	addSet("A", data.A)
+	addSet("AAAA", data.AAAA)
+	addSet("CNAME", data.CNAME)
+	addSet("MX", data.MX)
+	addSet("NS", data.NS)
+	addSet("PTR", data.PTR)
+	addSet("SOA", soaStrings(data.SOA))
+	addSet("TXT", data.TXT)
+	addSet("SRV", data.SRV)
+	addSet("CAA", data.CAA)
+
+	sort.Slice(sets, func(i, j int) bool { return sets[i].typ < sets[j].typ })
+
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("rcode=%d", data.StatusCodeRaw))
+	for _, s := range sets {
+		b.WriteByte('|')
+		b.WriteString(s.typ)
+		b.WriteByte(':')
+		b.WriteString(strings.Join(s.values, ","))
+	}
+	empty := len(sets) == 0
+	return b.String(), empty
+}
+
+// soaStrings converts SOA records to a comparable string slice.
+func soaStrings(soas []retryabledns.SOA) []string {
+	out := make([]string, 0, len(soas))
+	for _, s := range soas {
+		out = append(out, fmt.Sprintf("%s|%s|%s|%d|%d|%d|%d|%d",
+			s.Name, s.NS, s.Mbox, s.Serial, s.Refresh, s.Retry, s.Expire, s.Minttl))
+	}
+	return out
+}
+
+// QuorumResult is the outcome of a quorum query.
+type QuorumResult struct {
+	// ConsensusSignature is the content signature that reached quorum, or empty
+	// if no signature reached the required votes.
+	ConsensusSignature string `json:"consensus_signature,omitempty"`
+	// ConsensusAnswer is the representative answer for the consensus signature,
+	// or nil if no consensus was reached.
+	ConsensusAnswer *ResponseData `json:"consensus_answer,omitempty"`
+	// VoteCounts maps each content signature to the number of resolvers that
+	// produced it.
+	VoteCounts map[string]int `json:"vote_counts,omitempty"`
+	// TotalVoters is the number of resolvers that produced any answer (including
+	// errors/empty).
+	TotalVoters int `json:"total_voters,omitempty"`
+	// QuorumRequired is the minimum votes needed for consensus.
+	QuorumRequired int `json:"quorum_required,omitempty"`
+	// ConsensusReached is true when some signature reached QuorumRequired.
+	ConsensusReached bool `json:"consensus_reached,omitempty"`
+	// AllAnswers is every per-resolver answer with provenance.
+	AllAnswers []*ResponseData `json:"all_answers,omitempty"`
+}
+
+// QueryMultipleQuorum queries every configured resolver and classifies answers
+// by content consensus. Implements the "quorum" resolver mode. A signature
+// reaches consensus when its vote count >= quorum. TTL differences alone do not
+// count as content divergence.
+func (d *DNSX) QueryMultipleQuorum(hostname string, quorum int) (*QuorumResult, error) {
+	allAnswers, err := d.QueryMultipleAll(hostname)
+	if err != nil {
+		return nil, err
+	}
+	if quorum < 1 {
+		quorum = 1
+	}
+
+	result := &QuorumResult{
+		VoteCounts:     make(map[string]int),
+		QuorumRequired: quorum,
+		AllAnswers:     allAnswers,
+	}
+
+	for _, ans := range allAnswers {
+		if ans.DNSData == nil {
+			result.VoteCounts["<error>"]++
+			result.TotalVoters++
+			continue
+		}
+		sig, _ := contentSignature(ans.DNSData)
+		result.VoteCounts[sig]++
+		result.TotalVoters++
+	}
+
+	// Find the signature with the most votes that also meets quorum.
+	bestSig := ""
+	bestVotes := 0
+	for sig, votes := range result.VoteCounts {
+		if votes > bestVotes || (votes == bestVotes && sig < bestSig) {
+			bestSig = sig
+			bestVotes = votes
+		}
+	}
+
+	if bestVotes >= quorum && bestSig != "<error>" {
+		result.ConsensusReached = true
+		result.ConsensusSignature = bestSig
+		// Pick the first answer matching the best signature as representative.
+		for _, ans := range allAnswers {
+			if ans.DNSData != nil {
+				sig, _ := contentSignature(ans.DNSData)
+				if sig == bestSig {
+					result.ConsensusAnswer = ans
+					break
+				}
+			}
+		}
+	}
+
+	return result, nil
+}
+
+// CompareResult is the outcome of a compare query.
+type CompareResult struct {
+	// AllAnswers is every per-resolver answer with provenance, in resolver
+	// order (not arrival order).
+	AllAnswers []*ResponseData `json:"all_answers,omitempty"`
+	// Divergences lists content signatures produced by more than one resolver
+	// but with differing values, plus signatures produced by only one resolver.
+	Divergences []CompareDivergence `json:"divergences,omitempty"`
+	// TotalResolvers is the number of resolvers queried.
+	TotalResolvers int `json:"total_resolvers,omitempty"`
+	// SuccessfulResolvers is the number that returned a parseable answer.
+	SuccessfulResolvers int `json:"successful_resolvers,omitempty"`
+	// FailedResolvers is the number that errored or returned empty.
+	FailedResolvers int `json:"failed_resolvers,omitempty"`
+}
+
+// CompareDivergence describes one content-signature divergence between resolvers.
+type CompareDivergence struct {
+	// Signature is the normalized content signature.
+	Signature string `json:"signature,omitempty"`
+	// Resolvers lists the resolvers that produced this signature.
+	Resolvers []string `json:"resolvers,omitempty"`
+	// VoteCount is how many resolvers produced exactly this signature.
+	VoteCount int `json:"vote_count,omitempty"`
+	// Unique indicates the signature was produced by only one resolver.
+	Unique bool `json:"unique,omitempty"`
+}
+
+// QueryMultipleCompare queries every configured resolver and returns every
+// answer with provenance, plus a structured list of divergences. Implements the
+// "compare" resolver mode. Comparison is independent of response arrival order.
+func (d *DNSX) QueryMultipleCompare(hostname string) (*CompareResult, error) {
+	allAnswers, err := d.QueryMultipleAll(hostname)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &CompareResult{
+		AllAnswers:     allAnswers,
+		TotalResolvers: len(allAnswers),
+		Divergences:    []CompareDivergence{},
+	}
+
+	sigToResolvers := make(map[string][]string)
+	for _, ans := range allAnswers {
+		if ans.DNSData == nil {
+			result.FailedResolvers++
+			continue
+		}
+		result.SuccessfulResolvers++
+		sig, _ := contentSignature(ans.DNSData)
+		sigToResolvers[sig] = append(sigToResolvers[sig], ans.Resolver)
+	}
+
+	for sig, resolvers := range sigToResolvers {
+		div := CompareDivergence{
+			Signature: sig,
+			Resolvers: resolvers,
+			VoteCount: len(resolvers),
+			Unique:    len(resolvers) == 1,
+		}
+		result.Divergences = append(result.Divergences, div)
+	}
+
+	// Sort divergences for deterministic output: non-unique first, then by
+	// signature string.
+	sort.Slice(result.Divergences, func(i, j int) bool {
+		if result.Divergences[i].Unique != result.Divergences[j].Unique {
+			return !result.Divergences[i].Unique // non-unique (divergent) first
+		}
+		return result.Divergences[i].Signature < result.Divergences[j].Signature
+	})
+
+	return result, nil
 }
 
 // Trace performs a DNS trace of the specified types and returns raw responses
