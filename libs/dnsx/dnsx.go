@@ -26,6 +26,8 @@ type DNSX struct {
 	// resolverLimiters holds a per-resolver rate limiter when
 	// Options.ResolverRateLimit is positive.
 	resolverLimiters map[string]*ratelimit.Limiter
+	// cache is an optional TTL-bounded cache of DNS answers.
+	cache *TTLCache
 }
 
 // Options contains configuration options
@@ -46,6 +48,11 @@ type Options struct {
 	// ResolverRateLimit limits DNS requests per second per resolver
 	// (disabled when <= 0).
 	ResolverRateLimit int
+	// CacheEnabled turns on the TTL-bounded answer cache.
+	CacheEnabled bool
+	// CacheTTL is the default TTL used when a response's own TTL is zero or
+	// when caching negative answers (NXDOMAIN etc.).
+	CacheTTL time.Duration
 }
 
 // ResponseData to show output result
@@ -189,6 +196,9 @@ func New(options Options) (*DNSX, error) {
 			dnsx.resolverLimiters[r] = ratelimit.New(context.Background(), uint(options.ResolverRateLimit), time.Second)
 		}
 	}
+	if options.CacheEnabled {
+		dnsx.cache = NewTTLCache()
+	}
 	return dnsx, nil
 }
 
@@ -283,6 +293,26 @@ func (d *DNSX) QueryMultipleAll(hostname string) ([]*ResponseData, error) {
 					lim.Take()
 				}
 			}
+			// Check the TTL cache first so we never re-query a resolver for an
+			// answer that is still valid, and never attribute one resolver's
+			// answer to another (cacheKey includes resolver).
+			ckey := cacheKey(hostname, filteredQuestionTypes[0], resolverStr)
+			if d.cache != nil {
+				if cached, ok := d.cache.Get(ckey); ok {
+					rd := &ResponseData{
+						DNSData:   cached.DNSData,
+						Resolver:  resolverStr,
+						Protocol:  protocolFromResolver(resolverStr),
+						Latency:   "0s (cache)",
+						Attempts:  0,
+						QueryTime: "0s (cache)",
+					}
+					mu.Lock()
+					results = append(results, rd)
+					mu.Unlock()
+					return
+				}
+			}
 			dnsData, err := d.dnsClient.QueryMultipleWithResolver(hostname, filteredQuestionTypes, resolver)
 			latency := time.Since(queryStart).Round(time.Millisecond).String()
 
@@ -307,6 +337,23 @@ func (d *DNSX) QueryMultipleAll(hostname string) ([]*ResponseData, error) {
 			}
 			if dnsData.Timestamp.IsZero() {
 				dnsData.Timestamp = time.Now()
+			}
+
+			// Store in TTL cache using the response's own TTL (or default).
+			if d.cache != nil {
+				ttl := time.Duration(dnsData.TTL) * time.Second
+				if ttl <= 0 {
+					ttl = d.Options.CacheTTL
+				}
+				cached := &ResponseData{
+					DNSData:   dnsData,
+					Resolver:  resolverStr,
+					Protocol:  protocolFromResolver(resolverStr),
+					Latency:   latency,
+					Attempts:  1,
+					QueryTime: latency,
+				}
+				d.cache.Set(ckey, cached, ttl)
 			}
 
 			rd := &ResponseData{

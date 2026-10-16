@@ -95,6 +95,8 @@ type Options struct {
 	scope                 []string
 	scopeLoaded           bool
 	ResolverRateLimit     int
+	CacheEnabled          bool
+	CacheTTL              time.Duration
 }
 
 // ShouldLoadResume resume file
@@ -201,6 +203,8 @@ func ParseOptions() *Options {
 		flagSet.BoolVar(&options.Stream, "stream", false, "stream mode (wordlist, wildcard, stats and stop/resume will be disabled)"),
 		flagSet.DurationVar(&options.Timeout, "timeout", 3*time.Second, "maximum time to wait for a DNS query to complete"),
 		flagSet.BoolVar(&options.DryRun, "dry-run", false, "show planned queries and estimates without sending any DNS traffic"),
+		flagSet.BoolVar(&options.CacheEnabled, "cache-enabled", false, "enable TTL-bounded answer cache"),
+		flagSet.DurationVar(&options.CacheTTL, "cache-ttl", 0, "default cache TTL when response TTL is zero (0 = use response TTL only)"),
 	)
 
 	flagSet.CreateGroup("configs", "Configurations",
@@ -314,6 +318,8 @@ func RunDryRun(options *Options) {
 	gologger.Print().Msgf("Timeout       : %s", options.Timeout)
 	gologger.Print().Msgf("Retries       : %d", options.Retries)
 	gologger.Print().Msgf("Rate limit    : %d req/s", options.RateLimit)
+	gologger.Print().Msgf("Resolver rate : %d req/s", options.ResolverRateLimit)
+	gologger.Print().Msgf("Cache enabled : %v (ttl=%s)", options.CacheEnabled, options.CacheTTL)
 	gologger.Print().Msgf("Question types: %s", questionTypesSummary(options))
 	gologger.Print().Msgf("Output JSON   : %v", options.JSON)
 

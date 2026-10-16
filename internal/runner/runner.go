@@ -107,6 +107,8 @@ func New(options *Options) (*Runner, error) {
 	dnsxOptions.Timeout = options.Timeout
 	dnsxOptions.ResolverMode = options.resolverMode
 	dnsxOptions.ResolverRateLimit = options.ResolverRateLimit
+	dnsxOptions.CacheEnabled = options.CacheEnabled
+	dnsxOptions.CacheTTL = options.CacheTTL
 	if options.Resolvers != "" {
 		dnsxOptions.BaseResolvers = []string{}
 		// If it's a file load resolvers from it
