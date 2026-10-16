@@ -1,0 +1,15 @@
+Benchmark: local DNS server (127.0.0.1), 1 resolver, 1000 hosts, type A
+================================================================================
+mode                   total(s)          qps   successful      p50(ms)
+first-success            2.0842        143.9          300         12.0
+all                      0.0169      59340.4         1000          0.0
+quorum(1)                0.0083     121173.7         1000          0.0
+compare                  0.0095     105687.6         1000          0.0
+
+Notes:
+- qps = successful answers / total wall-clock time.
+- p50 computed over per-host latency; falls back to per-call wall time when
+  the resolver mode does not populate Latency (first-success).
+- No public targets used; all traffic stays on 127.0.0.1.
+- first-success is the upstream-compatible baseline.
+- 'all', 'quorum', 'compare' are HyperDNSx additions with per-resolver provenance.
