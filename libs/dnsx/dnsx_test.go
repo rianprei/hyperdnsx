@@ -205,3 +205,31 @@ func TestContentSignature_CNAMEChain(t *testing.T) {
 	sb, _ := contentSignature(b)
 	require.Equal(t, sa, sb, "CNAME chain with same records but different TTL must match")
 }
+
+func TestUnknownRecords_ExcludesMappedTypes(t *testing.T) {
+	// AllRecords includes zone-file-like strings for every type queried.
+	data := &retryabledns.DNSData{
+		Host: "example.com",
+		AllRecords: []string{
+			"example.com. 60 IN A 1.1.1.1",
+			"example.com. 60 IN DNSKEY 256 3 8 AwEAA...",
+			"example.com. 60 IN DS 12345 8 2 ...",
+			"example.com. 60 IN CNAME target.example.com.",
+		},
+	}
+	got := unknownRecords(data)
+	require.Len(t, got, 2, "only DNSKEY and DS should be unknown")
+	require.Contains(t, got, "example.com. 60 IN DNSKEY 256 3 8 AwEAA...")
+	require.Contains(t, got, "example.com. 60 IN DS 12345 8 2 ...")
+}
+
+func TestUnknownRecords_EmptyWhenAllMapped(t *testing.T) {
+	data := &retryabledns.DNSData{
+		Host: "example.com",
+		AllRecords: []string{
+			"example.com. 60 IN A 1.1.1.1",
+			"example.com. 60 IN AAAA ::1",
+		},
+	}
+	require.Empty(t, unknownRecords(data))
+}

@@ -78,6 +78,13 @@ type Options struct {
 	Stream                bool
 	Timeout               time.Duration
 	CAA                   bool
+	DNSKey                bool
+	Ds                    bool
+	Rrsig                 bool
+	Nsec                  bool
+	Nsec3                 bool
+	Tlsa                  bool
+	Sshfp                 bool
 	QueryAll              bool
 	ExcludeType           []string
 	OutputCDN             bool
@@ -122,19 +129,26 @@ func ParseOptions() *Options {
 	)
 
 	queries := goflags.AllowdTypes{
-		"none":  goflags.EnumVariable(0),
-		"a":     goflags.EnumVariable(1),
-		"aaaa":  goflags.EnumVariable(2),
-		"cname": goflags.EnumVariable(3),
-		"ns":    goflags.EnumVariable(4),
-		"txt":   goflags.EnumVariable(5),
-		"srv":   goflags.EnumVariable(6),
-		"ptr":   goflags.EnumVariable(7),
-		"mx":    goflags.EnumVariable(8),
-		"soa":   goflags.EnumVariable(9),
-		"axfr":  goflags.EnumVariable(10),
-		"caa":   goflags.EnumVariable(11),
-		"any":   goflags.EnumVariable(12),
+		"none":   goflags.EnumVariable(0),
+		"a":      goflags.EnumVariable(1),
+		"aaaa":   goflags.EnumVariable(2),
+		"cname":  goflags.EnumVariable(3),
+		"ns":     goflags.EnumVariable(4),
+		"txt":    goflags.EnumVariable(5),
+		"srv":    goflags.EnumVariable(6),
+		"ptr":    goflags.EnumVariable(7),
+		"mx":     goflags.EnumVariable(8),
+		"soa":    goflags.EnumVariable(9),
+		"axfr":   goflags.EnumVariable(10),
+		"caa":    goflags.EnumVariable(11),
+		"any":    goflags.EnumVariable(12),
+		"dnskey": goflags.EnumVariable(48),
+		"ds":     goflags.EnumVariable(43),
+		"rrsig":  goflags.EnumVariable(46),
+		"nsec":   goflags.EnumVariable(47),
+		"nsec3":  goflags.EnumVariable(50),
+		"tlsa":   goflags.EnumVariable(52),
+		"sshfp":  goflags.EnumVariable(44),
 	}
 
 	flagSet.CreateGroup("query", "Query",
@@ -150,6 +164,13 @@ func ParseOptions() *Options {
 		flagSet.BoolVar(&options.ANY, "any", false, "query ANY record"),
 		flagSet.BoolVar(&options.AXFR, "axfr", false, "query AXFR"),
 		flagSet.BoolVar(&options.CAA, "caa", false, "query CAA record"),
+		flagSet.BoolVar(&options.DNSKey, "dnskey", false, "query DNSKEY record (DNSSEC, collection only)"),
+		flagSet.BoolVar(&options.Ds, "ds", false, "query DS record (DNSSEC, collection only)"),
+		flagSet.BoolVar(&options.Rrsig, "rrsig", false, "query RRSIG record (DNSSEC, collection only)"),
+		flagSet.BoolVar(&options.Nsec, "nsec", false, "query NSEC record (DNSSEC, collection only)"),
+		flagSet.BoolVar(&options.Nsec3, "nsec3", false, "query NSEC3 record (DNSSEC, collection only)"),
+		flagSet.BoolVar(&options.Tlsa, "tlsa", false, "query TLSA record (DANE, collection only)"),
+		flagSet.BoolVar(&options.Sshfp, "sshfp", false, "query SSHFP record (collection only)"),
 		flagSet.BoolVarP(&options.QueryAll, "recon", "all", false, "query all the dns records (a,aaaa,cname,ns,txt,srv,ptr,mx,soa,axfr,caa)"),
 		flagSet.EnumSliceVarP(&options.ExcludeType, "exclude-type", "e", []goflags.EnumVariable{0}, "dns query type to exclude (a,aaaa,cname,ns,txt,srv,ptr,mx,soa,axfr,caa)", queries),
 	)
@@ -355,6 +376,9 @@ func questionTypesSummary(options *Options) string {
 		{"NS", options.NS}, {"TXT", options.TXT}, {"SRV", options.SRV},
 		{"PTR", options.PTR}, {"MX", options.MX}, {"SOA", options.SOA},
 		{"ANY", options.ANY}, {"AXFR", options.AXFR}, {"CAA", options.CAA},
+		{"DNSKEY", options.DNSKey}, {"DS", options.Ds}, {"RRSIG", options.Rrsig},
+		{"NSEC", options.Nsec}, {"NSEC3", options.Nsec3}, {"TLSA", options.Tlsa},
+		{"SSHFP", options.Sshfp},
 	} {
 		if t.set {
 			types = append(types, t.name)
@@ -402,6 +426,27 @@ func selectedQuestionTypes(options *Options) int {
 		count++
 	}
 	if options.CAA {
+		count++
+	}
+	if options.DNSKey {
+		count++
+	}
+	if options.Ds {
+		count++
+	}
+	if options.Rrsig {
+		count++
+	}
+	if options.Nsec {
+		count++
+	}
+	if options.Nsec3 {
+		count++
+	}
+	if options.Tlsa {
+		count++
+	}
+	if options.Sshfp {
 		count++
 	}
 	return count
@@ -709,18 +754,25 @@ func (options *Options) configureResume() error {
 
 func (options *Options) configureQueryOptions() {
 	queryMap := map[string]*bool{
-		"a":     &options.A,
-		"aaaa":  &options.AAAA,
-		"cname": &options.CNAME,
-		"ns":    &options.NS,
-		"txt":   &options.TXT,
-		"srv":   &options.SRV,
-		"ptr":   &options.PTR,
-		"mx":    &options.MX,
-		"soa":   &options.SOA,
-		"axfr":  &options.AXFR,
-		"caa":   &options.CAA,
-		"any":   &options.ANY,
+		"a":      &options.A,
+		"aaaa":   &options.AAAA,
+		"cname":  &options.CNAME,
+		"ns":     &options.NS,
+		"txt":    &options.TXT,
+		"srv":    &options.SRV,
+		"ptr":    &options.PTR,
+		"mx":     &options.MX,
+		"soa":    &options.SOA,
+		"axfr":   &options.AXFR,
+		"caa":    &options.CAA,
+		"any":    &options.ANY,
+		"dnskey": &options.DNSKey,
+		"ds":     &options.Ds,
+		"rrsig":  &options.Rrsig,
+		"nsec":   &options.Nsec,
+		"nsec3":  &options.Nsec3,
+		"tlsa":   &options.Tlsa,
+		"sshfp":  &options.Sshfp,
 	}
 
 	if options.QueryAll {

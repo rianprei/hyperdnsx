@@ -904,6 +904,7 @@ func (r *Runner) worker() {
 				r.outputRecordType(domain, dnsData.SRV, "SRV", dnsData.CDNName, dnsData.ASN)
 				r.outputRecordType(domain, dnsData.CAA, "CAA", dnsData.CDNName, dnsData.ASN)
 				r.outputRecordType(domain, dnsData.PTR, "PTR", dnsData.CDNName, dnsData.ASN)
+				r.outputRecordType(domain, dnsData.Unknown, "UNKNOWN", dnsData.CDNName, dnsData.ASN)
 				continue
 			}
 
@@ -932,6 +933,27 @@ func (r *Runner) worker() {
 			}
 			if r.options.SOA {
 				r.outputRecordType(domain, sliceutil.Dedupe(dnsData.GetSOARecords()), "SOA", dnsData.CDNName, dnsData.ASN)
+			}
+			if r.options.DNSKey {
+				r.outputRecordType(domain, dnsData.Unknown, "DNSKEY", dnsData.CDNName, dnsData.ASN)
+			}
+			if r.options.Ds {
+				r.outputRecordType(domain, dnsData.Unknown, "DS", dnsData.CDNName, dnsData.ASN)
+			}
+			if r.options.Rrsig {
+				r.outputRecordType(domain, dnsData.Unknown, "RRSIG", dnsData.CDNName, dnsData.ASN)
+			}
+			if r.options.Nsec {
+				r.outputRecordType(domain, dnsData.Unknown, "NSEC", dnsData.CDNName, dnsData.ASN)
+			}
+			if r.options.Nsec3 {
+				r.outputRecordType(domain, dnsData.Unknown, "NSEC3", dnsData.CDNName, dnsData.ASN)
+			}
+			if r.options.Tlsa {
+				r.outputRecordType(domain, dnsData.Unknown, "TLSA", dnsData.CDNName, dnsData.ASN)
+			}
+			if r.options.Sshfp {
+				r.outputRecordType(domain, dnsData.Unknown, "SSHFP", dnsData.CDNName, dnsData.ASN)
 			}
 			if r.options.ANY {
 				allParsedRecords := sliceutil.Merge(
@@ -1065,6 +1087,13 @@ func (r *Runner) hasSelectedRecord(dnsData *dnsx.ResponseData) bool {
 		r.options.MX && len(dnsData.MX) > 0,
 		r.options.SOA && len(dnsData.SOA) > 0,
 		r.options.CAA && len(dnsData.CAA) > 0,
+		r.options.DNSKey && len(dnsData.Unknown) > 0,
+		r.options.Ds && len(dnsData.Unknown) > 0,
+		r.options.Rrsig && len(dnsData.Unknown) > 0,
+		r.options.Nsec && len(dnsData.Unknown) > 0,
+		r.options.Nsec3 && len(dnsData.Unknown) > 0,
+		r.options.Tlsa && len(dnsData.Unknown) > 0,
+		r.options.Sshfp && len(dnsData.Unknown) > 0,
 		r.options.ANY:
 		return true
 	}

@@ -60,15 +60,18 @@ type ResponseData struct {
 	*retryabledns.DNSData
 	// Provenance fields recorded per answer so consumers can trace which
 	// resolver produced which answer, over which transport, and how long it took.
-	Resolver  string       `json:"resolver,omitempty" csv:"resolver"`
-	Protocol  string       `json:"protocol,omitempty" csv:"protocol"`
-	Latency   string       `json:"latency,omitempty" csv:"latency"`
-	Attempts  int          `json:"attempts,omitempty" csv:"attempts"`
-	IsCDNIP   bool         `json:"cdn,omitempty" csv:"cdn"`
-	CDNName   string       `json:"cdn-name,omitempty" csv:"cdn-name"`
-	CDNType   string       `json:"cdn-type,omitempty" csv:"cdn-type"`
-	ASN       *AsnResponse `json:"asn,omitempty" csv:"asn"`
-	QueryTime string       `json:"query-time,omitempty" csv:"query-time"`
+	Resolver string       `json:"resolver,omitempty" csv:"resolver"`
+	Protocol string       `json:"protocol,omitempty" csv:"protocol"`
+	Latency  string       `json:"latency,omitempty" csv:"latency"`
+	Attempts int          `json:"attempts,omitempty" csv:"attempts"`
+	IsCDNIP  bool         `json:"cdn,omitempty" csv:"cdn"`
+	CDNName  string       `json:"cdn-name,omitempty" csv:"cdn-name"`
+	CDNType  string       `json:"cdn-type,omitempty" csv:"cdn-type"`
+	ASN      *AsnResponse `json:"asn,omitempty" csv:"asn"`
+	// Unknown holds records of types not parsed by retryabledns (e.g. DNSSEC,
+	// DANE, SSHFP) as retrieved from AllRecords, so no data is silently lost.
+	Unknown   []string `json:"unknown,omitempty" csv:"unknown"`
+	QueryTime string   `json:"query-time,omitempty" csv:"query-time"`
 }
 type AsnResponse struct {
 	AsNumber  string   `json:"as-number,omitempty" csv:"as_number"`
@@ -363,6 +366,7 @@ func (d *DNSX) QueryMultipleAll(hostname string) ([]*ResponseData, error) {
 				Latency:   latency,
 				Attempts:  1,
 				QueryTime: latency,
+				Unknown:   unknownRecords(dnsData),
 			}
 			// If the resolver string carried protocol info, DNSData.Resolver may
 			// already be populated; prefer the canonical resolver string.
@@ -604,4 +608,39 @@ func (d *DNSX) Trace(hostname string) (*retryabledns.TraceData, error) {
 // Trace performs a DNS trace of the specified types and returns raw responses
 func (d *DNSX) AXFR(hostname string) (*retryabledns.AXFRData, error) {
 	return d.dnsClient.AXFR(hostname)
+}
+
+// mappedTypes are the DNS RR types parsed into dedicated fields by
+// retryabledns. Records of any other type are surfaced via Unknown.
+var mappedTypes = map[uint16]bool{
+	miekgdns.TypeA:     true,
+	miekgdns.TypeNS:    true,
+	miekgdns.TypeCNAME: true,
+	miekgdns.TypeSOA:   true,
+	miekgdns.TypePTR:   true,
+	miekgdns.TypeMX:    true,
+	miekgdns.TypeTXT:   true,
+	miekgdns.TypeSRV:   true,
+	miekgdns.TypeCAA:   true,
+	miekgdns.TypeAAAA:  true,
+}
+
+// unknownRecords returns AllRecords entries whose RR type is not parsed into
+// a dedicated field, so DNSSEC/DANE/SSHFP/etc. data is not silently lost.
+func unknownRecords(data *retryabledns.DNSData) []string {
+	var out []string
+	for _, rec := range data.AllRecords {
+		// Zone-file-like record: "name TTL class TYPE value..."
+		fields := strings.Fields(rec)
+		if len(fields) < 4 {
+			continue
+		}
+		typeStr := strings.ToUpper(fields[3])
+		qtype, ok := miekgdns.StringToType[typeStr]
+		if !ok || mappedTypes[qtype] {
+			continue
+		}
+		out = append(out, rec)
+	}
+	return out
 }
