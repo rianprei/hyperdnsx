@@ -2,6 +2,8 @@ package runner
 
 import (
 	"errors"
+	"fmt"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -88,6 +90,11 @@ type Options struct {
 	resolverMode          dnsx.ResolverMode
 	Quorum                int
 	quorum                int
+	DryRun                bool
+	ScopeFile             string
+	scope                 []string
+	scopeLoaded           bool
+	ResolverRateLimit     int
 }
 
 // ShouldLoadResume resume file
@@ -160,6 +167,7 @@ func ParseOptions() *Options {
 	flagSet.CreateGroup("rate-limit", "Rate-limit",
 		flagSet.IntVarP(&options.Threads, "threads", "t", 100, "number of concurrent threads to use"),
 		flagSet.IntVarP(&options.RateLimit, "rate-limit", "rl", -1, "number of dns request/second to make (disabled as default)"),
+		flagSet.IntVarP(&options.ResolverRateLimit, "resolver-rate-limit", "", -1, "per-resolver dns request/second limit (disabled as default)"),
 	)
 
 	flagSet.CreateGroup("update", "Update",
@@ -192,6 +200,7 @@ func ParseOptions() *Options {
 		flagSet.BoolVar(&options.Resume, "resume", false, "resume existing scan"),
 		flagSet.BoolVar(&options.Stream, "stream", false, "stream mode (wordlist, wildcard, stats and stop/resume will be disabled)"),
 		flagSet.DurationVar(&options.Timeout, "timeout", 3*time.Second, "maximum time to wait for a DNS query to complete"),
+		flagSet.BoolVar(&options.DryRun, "dry-run", false, "show planned queries and estimates without sending any DNS traffic"),
 	)
 
 	flagSet.CreateGroup("configs", "Configurations",
@@ -203,6 +212,7 @@ func ParseOptions() *Options {
 		flagSet.BoolVar(&options.AutoWildcard, "auto-wildcard", false, "automatically detect wildcard domains for filtering"),
 		flagSet.StringVarP(&options.WildcardDomain, "wildcard-domain", "wd", "", "domain name for manual wildcard filtering (mutually exclusive with -auto-wildcard; other flags will be ignored - json output recommended)"),
 		flagSet.StringVar(&options.Proxy, "proxy", "", "proxy to use (eg socks5://127.0.0.1:8080)"),
+		flagSet.StringVarP(&options.ScopeFile, "scope-file", "", "", "file with allowed scope domains; candidates outside scope are rejected"),
 	)
 
 	_ = flagSet.Parse()
@@ -280,7 +290,229 @@ func ParseOptions() *Options {
 
 	options.validateOptions()
 
+	if !options.DryRun && options.ScopeFile != "" {
+		if err := options.loadScope(); err != nil {
+			gologger.Fatal().Msgf("scope-file: %v", err)
+		}
+	}
+
+	if options.DryRun {
+		RunDryRun(options)
+		os.Exit(0)
+	}
+
 	return options
+}
+
+// RunDryRun prints the planned queries and estimates without sending any DNS
+// traffic. It satisfies the --dry-run contract: no network connections, no
+// update checks, no authentication, and no irreversible consumption of stdin.
+func RunDryRun(options *Options) {
+	gologger.Print().Msgf("=== HyperDNSx dry-run (no DNS traffic will be sent) ===")
+	gologger.Print().Msgf("Resolver mode : %s", options.resolverMode)
+	gologger.Print().Msgf("Resolvers     : %s", options.Resolvers)
+	gologger.Print().Msgf("Timeout       : %s", options.Timeout)
+	gologger.Print().Msgf("Retries       : %d", options.Retries)
+	gologger.Print().Msgf("Rate limit    : %d req/s", options.RateLimit)
+	gologger.Print().Msgf("Question types: %s", questionTypesSummary(options))
+	gologger.Print().Msgf("Output JSON   : %v", options.JSON)
+
+	// Estimate candidate count from inputs without consuming stdin
+	// irreversibly: count file lines or comma-separated items.
+	candidates := estimateCandidates(options)
+	gologger.Print().Msgf("Candidates    : %d (estimated)", candidates)
+
+	queryTypes := selectedQuestionTypes(options)
+	if queryTypes == 0 {
+		queryTypes = 1 // default A
+	}
+	resolverCount := len(strings.Split(options.Resolvers, ","))
+	if resolverCount == 0 || options.Resolvers == "" {
+		resolverCount = len(dnsx.DefaultResolvers)
+	}
+	multiplier := resolverCount
+	if options.resolverMode == dnsx.ResolverModeFirstSuccess {
+		multiplier = 1
+	}
+	estimatedQueries := candidates * queryTypes * multiplier
+	gologger.Print().Msgf("Est. queries  : %d (candidates × types × resolvers/mode)", estimatedQueries)
+	gologger.Print().Msgf("=== end dry-run ===")
+}
+
+func questionTypesSummary(options *Options) string {
+	var types []string
+	for _, t := range []struct {
+		name string
+		set  bool
+	}{
+		{"A", options.A}, {"AAAA", options.AAAA}, {"CNAME", options.CNAME},
+		{"NS", options.NS}, {"TXT", options.TXT}, {"SRV", options.SRV},
+		{"PTR", options.PTR}, {"MX", options.MX}, {"SOA", options.SOA},
+		{"ANY", options.ANY}, {"AXFR", options.AXFR}, {"CAA", options.CAA},
+	} {
+		if t.set {
+			types = append(types, t.name)
+		}
+	}
+	if len(types) == 0 {
+		return "A (default)"
+	}
+	return strings.Join(types, ", ")
+}
+
+func selectedQuestionTypes(options *Options) int {
+	count := 0
+	if options.A {
+		count++
+	}
+	if options.AAAA {
+		count++
+	}
+	if options.CNAME {
+		count++
+	}
+	if options.NS {
+		count++
+	}
+	if options.TXT {
+		count++
+	}
+	if options.SRV {
+		count++
+	}
+	if options.PTR {
+		count++
+	}
+	if options.MX {
+		count++
+	}
+	if options.SOA {
+		count++
+	}
+	if options.ANY {
+		count++
+	}
+	if options.AXFR {
+		count++
+	}
+	if options.CAA {
+		count++
+	}
+	return count
+}
+
+// estimateCandidates counts input candidates without consuming stdin.
+func estimateCandidates(options *Options) int {
+	count := 0
+	if options.Hosts != "" {
+		count += countItems(options.Hosts)
+	}
+	if options.Domains != "" && options.WordList != "" {
+		count += countItems(options.Domains) * countItems(options.WordList)
+	}
+	return count
+}
+
+func countItems(arg string) int {
+	if fileutil.FileExists(arg) {
+		n := 0
+		for line, err := range fileutil.Lines(arg) {
+			if err != nil {
+				break
+			}
+			if strings.TrimSpace(line) != "" {
+				n++
+			}
+		}
+		return n
+	}
+	if arg == "" {
+		return 0
+	}
+	// Comma-separated or single item.
+	items := strings.Split(arg, ",")
+	n := 0
+	for _, it := range items {
+		if strings.TrimSpace(it) != "" {
+			n++
+		}
+	}
+	return n
+}
+
+// loadScope reads the scope file and normalizes each line into an allowed
+// DNS suffix. One domain per line; comments (#) and blank lines are ignored.
+func (options *Options) loadScope() error {
+	if !fileutil.FileExists(options.ScopeFile) {
+		return fmt.Errorf("scope file not found: %s", options.ScopeFile)
+	}
+	var scope []string
+	for line, err := range fileutil.Lines(options.ScopeFile) {
+		if err != nil {
+			break
+		}
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		norm := normalizeScopeDomain(line)
+		if norm == "" {
+			continue
+		}
+		scope = append(scope, norm)
+	}
+	options.scope = scope
+	options.scopeLoaded = true
+	gologger.Print().Msgf("scope loaded: %d allowed suffix(es) from %s", len(scope), options.ScopeFile)
+	return nil
+}
+
+// normalizeScopeDomain lowercases and strips a trailing root dot from a scope
+// entry. Invalid entries return "".
+func normalizeScopeDomain(domain string) string {
+	domain = strings.TrimSpace(strings.ToLower(domain))
+	domain = strings.TrimSuffix(domain, ".")
+	if domain == "" {
+		return ""
+	}
+	// Reject entries containing whitespace, control chars, or wildcards.
+	for _, r := range domain {
+		if r == ' ' || r == '\t' || r == '\r' || r == '\n' || r == '*' {
+			return ""
+		}
+	}
+	// Reject IP addresses (scope is domain-suffix based, not IP based).
+	if net.ParseIP(domain) != nil {
+		return ""
+	}
+	_, ok := dns.IsDomainName(dns.Fqdn(domain))
+	if !ok {
+		return ""
+	}
+	return domain
+}
+
+// isInScope reports whether candidate is allowed by the loaded scope. A
+// candidate is in scope if it equals a scope entry or is a subdomain of one
+// (i.e. ends with "." + scopeEntry). This prevents suffix-spoofing:
+// "example.com.attacker.invalid" is NOT in scope of "example.com".
+func (options *Options) isInScope(candidate string) bool {
+	if !options.scopeLoaded || len(options.scope) == 0 {
+		return true // no scope configured: allow everything
+	}
+	cand := normalizeScopeDomain(candidate)
+	if cand == "" {
+		return false
+	}
+	for _, suffix := range options.scope {
+		if cand == suffix {
+			return true
+		}
+		if strings.HasSuffix(cand, "."+suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 func (options *Options) validateOptions() {

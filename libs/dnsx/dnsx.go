@@ -1,6 +1,7 @@
 package dnsx
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 
 	miekgdns "github.com/miekg/dns"
 	"github.com/projectdiscovery/cdncheck"
+	"github.com/projectdiscovery/ratelimit"
 	retryabledns "github.com/projectdiscovery/retryabledns"
 	iputil "github.com/projectdiscovery/utils/ip"
 	sliceutil "github.com/projectdiscovery/utils/slice"
@@ -21,6 +23,9 @@ type DNSX struct {
 	dnsClient *retryabledns.Client
 	Options   *Options
 	cdn       *cdncheck.Client
+	// resolverLimiters holds a per-resolver rate limiter when
+	// Options.ResolverRateLimit is positive.
+	resolverLimiters map[string]*ratelimit.Limiter
 }
 
 // Options contains configuration options
@@ -38,6 +43,9 @@ type Options struct {
 	// ResolverMode controls how queries are dispatched to resolvers.
 	// Defaults to first-success for compatibility with upstream dnsx.
 	ResolverMode ResolverMode
+	// ResolverRateLimit limits DNS requests per second per resolver
+	// (disabled when <= 0).
+	ResolverRateLimit int
 }
 
 // ResponseData to show output result
@@ -172,6 +180,15 @@ func New(options Options) (*DNSX, error) {
 	if options.OutputCDN {
 		dnsx.cdn = cdncheck.New()
 	}
+	if options.ResolverRateLimit > 0 {
+		dnsx.resolverLimiters = make(map[string]*ratelimit.Limiter, len(options.BaseResolvers))
+		for _, r := range options.BaseResolvers {
+			if r == "" {
+				continue
+			}
+			dnsx.resolverLimiters[r] = ratelimit.New(context.Background(), uint(options.ResolverRateLimit), time.Second)
+		}
+	}
 	return dnsx, nil
 }
 
@@ -260,6 +277,12 @@ func (d *DNSX) QueryMultipleAll(hostname string) ([]*ResponseData, error) {
 			}
 
 			queryStart := time.Now()
+			// Per-resolver rate limit before contacting the resolver.
+			if d.Options.ResolverRateLimit > 0 && d.resolverLimiters != nil {
+				if lim, ok := d.resolverLimiters[resolverStr]; ok {
+					lim.Take()
+				}
+			}
 			dnsData, err := d.dnsClient.QueryMultipleWithResolver(hostname, filteredQuestionTypes, resolver)
 			latency := time.Since(queryStart).Round(time.Millisecond).String()
 

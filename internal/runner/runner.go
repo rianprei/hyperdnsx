@@ -106,6 +106,7 @@ func New(options *Options) (*Runner, error) {
 	dnsxOptions.Proxy = options.Proxy
 	dnsxOptions.Timeout = options.Timeout
 	dnsxOptions.ResolverMode = options.resolverMode
+	dnsxOptions.ResolverRateLimit = options.ResolverRateLimit
 	if options.Resolvers != "" {
 		dnsxOptions.BaseResolvers = []string{}
 		// If it's a file load resolvers from it
@@ -430,6 +431,11 @@ func (r *Runner) prepareInput() error {
 // addHostToHMap inserts a single host into the hybrid map, deduplicating, and
 // reports whether it was newly added (used to count the exact number of targets).
 func (r *Runner) addHostToHMap(host string) (added bool) {
+	// Scope enforcement: reject candidates outside the allowed DNS suffixes.
+	if !r.options.isInScope(host) {
+		gologger.Debug().Msgf("scope: rejecting %s (outside allowed scope)", host)
+		return false
+	}
 	if _, ok := r.hm.Get(host); ok {
 		return false
 	}

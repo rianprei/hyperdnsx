@@ -444,6 +444,75 @@ func TestRunner_resolverModeDefaultsToFirstSuccess(t *testing.T) {
 	require.NoError(t, runner.Run())
 }
 
+// ── Scope validation tests ──────────────────────────────────────────────────
+
+func TestNormalizeScopeDomain(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+		valid    bool
+	}{
+		{"Example.COM.", "example.com", true},
+		{"example.com", "example.com", true},
+		{"*.example.com", "", false}, // wildcard not allowed as scope entry
+		{"sub.example.com", "sub.example.com", true},
+		{"", "", false},
+		{"   ", "", false},
+		{"example.com.", "example.com", true},
+		{"sub..example.com", "", false},
+		{"foo bar", "", false},
+		{"192.168.1.1", "", false}, // IP not a domain suffix
+		{"# comment", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := normalizeScopeDomain(tt.input)
+			if tt.valid {
+				require.Equal(t, tt.expected, got)
+			} else {
+				require.Equal(t, "", got)
+			}
+		})
+	}
+}
+
+func TestIsInScope(t *testing.T) {
+	// No scope configured -> allow everything.
+	r := &Runner{options: &Options{scopeLoaded: false}}
+	require.True(t, r.options.isInScope("anything.example.com"))
+	require.True(t, r.options.isInScope("other.com"))
+
+	// Scope with example.com only.
+	r = &Runner{options: &Options{
+		scopeLoaded: true,
+		scope:       []string{"example.com"},
+	}}
+	require.True(t, r.options.isInScope("example.com"))
+	require.True(t, r.options.isInScope("sub.example.com"))
+	require.True(t, r.options.isInScope("deep.sub.example.com"))
+	require.True(t, r.options.isInScope("EXAMPLE.COM"))      // case-insensitive
+	require.True(t, r.options.isInScope("Sub.Example.COM.")) // trailing dot
+
+	// Suffix-spoofing must be rejected.
+	require.False(t, r.options.isInScope("example.com.attacker.invalid"))
+	require.False(t, r.options.isInScope("example.com.evil"))
+	require.False(t, r.options.isInScope("other.com"))
+	require.False(t, r.options.isInScope("examplecom")) // no dot boundary
+	require.False(t, r.options.isInScope(""))
+
+	// Empty candidate rejected when scope is active.
+	require.False(t, r.options.isInScope(""))
+
+	// Multiple scope entries.
+	r = &Runner{options: &Options{
+		scopeLoaded: true,
+		scope:       []string{"example.com", "test.org"},
+	}}
+	require.True(t, r.options.isInScope("a.example.com"))
+	require.True(t, r.options.isInScope("b.test.org"))
+	require.False(t, r.options.isInScope("c.example.net"))
+}
+
 // runResolverModeTest executes the runner against unresolvable local addresses
 // using the given resolver mode and returns the parsed JSONL output lines.
 func runResolverModeTest(t *testing.T, mode dnsx.ResolverMode, quorum int, servers []string, hosts []string) []map[string]interface{} {
