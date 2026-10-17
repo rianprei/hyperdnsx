@@ -1,0 +1,18 @@
+W1017 00:08:31.153921   11276 library.go:141] "golang.org/x/sys/unix" contains non-Go code that can't be inspected for further dependencies:
+/data/data/com.termux/files/home/go/pkg/mod/golang.org/x/sys@v0.45.0/unix/asm_linux_arm64.s
+W1017 00:08:31.155453   11276 library.go:141] "github.com/modern-go/reflect2" contains non-Go code that can't be inspected for further dependencies:
+/data/data/com.termux/files/home/go/pkg/mod/github.com/modern-go/reflect2@v1.0.2/relfect2_arm64.s
+/data/data/com.termux/files/home/go/pkg/mod/github.com/modern-go/reflect2@v1.0.2/relfect2_mips64x.s
+/data/data/com.termux/files/home/go/pkg/mod/github.com/modern-go/reflect2@v1.0.2/relfect2_mipsx.s
+/data/data/com.termux/files/home/go/pkg/mod/github.com/modern-go/reflect2@v1.0.2/relfect2_ppc64x.s
+W1017 00:08:31.156143   11276 library.go:141] "github.com/klauspost/compress/zstd/internal/xxhash" contains non-Go code that can't be inspected for further dependencies:
+/data/data/com.termux/files/home/go/pkg/mod/github.com/klauspost/compress@v1.18.2/zstd/internal/xxhash/xxhash_arm64.s
+W1017 00:08:31.156247   11276 library.go:141] "golang.org/x/crypto/chacha20" contains non-Go code that can't be inspected for further dependencies:
+/data/data/com.termux/files/home/go/pkg/mod/golang.org/x/crypto@v0.52.0/chacha20/chacha_arm64.s
+W1017 00:08:31.156294   11276 library.go:141] "golang.org/x/sys/cpu" contains non-Go code that can't be inspected for further dependencies:
+/data/data/com.termux/files/home/go/pkg/mod/golang.org/x/sys@v0.45.0/cpu/cpu_arm64.s
+W1017 00:08:31.156410   11276 library.go:141] "github.com/golang/snappy" contains non-Go code that can't be inspected for further dependencies:
+/data/data/com.termux/files/home/go/pkg/mod/github.com/golang/snappy@v0.0.4/decode_arm64.s
+/data/data/com.termux/files/home/go/pkg/mod/github.com/golang/snappy@v0.0.4/encode_arm64.s
+W1017 00:08:31.157119   11276 library.go:141] "github.com/zcalusic/sysinfo/cpuid" contains non-Go code that can't be inspected for further dependencies:
+/data/data/com.termux/files/home/go/pkg/mod/github.com/zcalusic/sysinfo@v1.0.2/cpuid/cpuid_default.s

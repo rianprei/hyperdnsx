@@ -1,0 +1,334 @@
+=== Symbol Results ===
+
+Vulnerability #1: GO-2026-6617
+    HTTP/2 server crash due to HPACK encoder race in net/http
+  More info: https://pkg.go.dev/vuln/GO-2026-6617
+  Module: golang.org/x/net
+    Found in: golang.org/x/net@v0.55.0
+    Fixed in: golang.org/x/net@v0.60.0
+    Example traces found:
+      #1: internal/runner/banner.go:5:2: runner.init calls pdcp.init, which eventually calls http2.ConfigureTransport
+      #2: benchmarks/bench_main.go:145:25: benchmarks.main calls fmt.Sprintf, which eventually calls http2.FrameType.String
+      #3: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.Transport.RoundTrip
+
+  Standard library
+    Found in: net/http/internal/http2@go1.27.1
+    Fixed in: net/http/internal/http2@go1.27.2
+    Example traces found:
+      #1: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.NetHTTPClientConn.Close
+      #2: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.NetHTTPClientConn.Close
+      #3: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.NetHTTPClientConn.RoundTrip
+      #4: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.NetHTTPClientConn.RoundTrip
+      #5: internal/runner/runner.go:573:21: runner.Runner.run calls clistats.Statistics.Stop, which eventually calls http2.Server.GracefulShutdown
+      #6: internal/runner/runner.go:573:21: runner.Runner.run calls clistats.Statistics.Stop, which eventually calls http2.Server.GracefulShutdown
+      #7: internal/runner/runner.go:422:16: runner.Runner.prepareInput calls clistats.Statistics.Start, which eventually calls http2.Server.ServeConn
+      #8: internal/runner/runner.go:422:16: runner.Runner.prepareInput calls clistats.Statistics.Start, which eventually calls http2.Server.ServeConn
+      #9: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.Transport.AddConn
+      #10: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.Transport.AddConn
+      #11: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.Transport.CloseIdleConnections
+      #12: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.Transport.CloseIdleConnections
+      #13: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.Transport.NewClientConn
+      #14: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.Transport.NewClientConn
+      #15: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.Transport.RoundTrip
+      #16: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.Transport.RoundTrip
+      #17: internal/runner/runner.go:656:24: runner.Runner.HandleOutput calls bufio.Writer.WriteString, which eventually calls http2.bufferedWriterTimeoutWriter.Write
+      #18: internal/runner/runner.go:656:24: runner.Runner.HandleOutput calls bufio.Writer.WriteString, which eventually calls http2.bufferedWriterTimeoutWriter.Write
+      #19: internal/runner/runner.go:656:24: runner.Runner.HandleOutput calls bufio.Writer.WriteString, which eventually calls http2.chunkWriter.Write
+      #20: internal/runner/runner.go:656:24: runner.Runner.HandleOutput calls bufio.Writer.WriteString, which eventually calls http2.chunkWriter.Write
+      #21: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which calls http2.gzipReader.Close
+      #22: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which calls http2.gzipReader.Close
+      #23: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.gzipReader.Read
+      #24: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.gzipReader.Read
+      #25: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.requestBody.Close
+      #26: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.requestBody.Close
+      #27: cmd/integration-test/integration-test.go:37:17: integration.main calls fmt.Fprintf, which calls http2.responseWriter.Write
+      #28: cmd/integration-test/integration-test.go:37:17: integration.main calls fmt.Fprintf, which calls http2.responseWriter.Write
+      #29: internal/runner/runner.go:422:16: runner.Runner.prepareInput calls clistats.Statistics.Start, which eventually calls http2.responseWriter.WriteHeader
+      #30: internal/runner/runner.go:422:16: runner.Runner.prepareInput calls clistats.Statistics.Start, which eventually calls http2.responseWriter.WriteHeader
+      #31: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.responseWriter.WriteString
+      #32: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.responseWriter.WriteString
+      #33: internal/runner/runner.go:656:24: runner.Runner.HandleOutput calls bufio.Writer.WriteString, which eventually calls http2.stickyErrWriter.Write
+      #34: internal/runner/runner.go:656:24: runner.Runner.HandleOutput calls bufio.Writer.WriteString, which eventually calls http2.stickyErrWriter.Write
+      #35: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which calls http2.transportResponseBody.Close
+      #36: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which calls http2.transportResponseBody.Close
+      #37: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.transportResponseBody.Read
+      #38: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.transportResponseBody.Read
+
+Vulnerability #2: GO-2026-6613
+    HTTP/1 server connection desynchronization after 2xx CONNECT response in
+    net/http
+  More info: https://pkg.go.dev/vuln/GO-2026-6613
+  Standard library
+    Found in: net/http@go1.27.1
+    Fixed in: net/http@go1.27.2
+    Example traces found:
+      #1: internal/runner/runner.go:656:24: runner.Runner.HandleOutput calls bufio.Writer.WriteString, which eventually calls http.CanonicalHeaderKey
+      #2: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http.Client.CloseIdleConnections
+      #3: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http.Client.Do
+      #4: internal/runner/options.go:306:76: runner.ParseOptions calls update.GetToolVersionCallback, which calls http.Client.Get
+      #5: internal/runner/runner.go:423:26: runner.Runner.prepareInput calls clistats.Statistics.GetStatResponse, which eventually calls http.Get
+      #6: internal/runner/runner.go:24:2: runner.init calls hybrid.init, which eventually calls http.HandleFunc
+      #7: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http.Header.Add
+      #8: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http.Header.Get
+      #9: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which calls http.Header.Set
+      #10: libs/dnsx/dnsx.go:243:34: dnsx.DNSX.QueryMultiple calls retryabledns.Client.QueryMultiple, which eventually calls http.NewRequest
+      #11: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http.NewRequestWithContext
+      #12: internal/runner/runner.go:422:16: runner.Runner.prepareInput calls clistats.Statistics.Start, which calls http.ServeMux.HandleFunc
+      #13: internal/runner/runner.go:422:16: runner.Runner.prepareInput calls clistats.Statistics.Start, which eventually calls http.Server.ListenAndServe
+      #14: internal/runner/runner.go:573:21: runner.Runner.run calls clistats.Statistics.Stop, which calls http.Server.Shutdown
+      #15: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which calls http.body.Close
+      #16: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http.body.Read
+      #17: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which calls http.bodyEOFSignal.Close
+      #18: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http.bodyEOFSignal.Read
+      #19: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http.bodyLocked.Read
+      #20: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http.bufioFlushWriter.Write
+      #21: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which calls http.cancelTimerBody.Close
+      #22: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http.cancelTimerBody.Read
+      #23: internal/runner/runner.go:656:24: runner.Runner.HandleOutput calls bufio.Writer.WriteString, which eventually calls http.checkConnErrorWriter.Write
+      #24: internal/runner/runner.go:656:24: runner.Runner.HandleOutput calls bufio.Writer.WriteString, which eventually calls http.chunkWriter.Write
+      #25: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http.connReader.Read
+      #26: internal/runner/runner.go:547:22: runner.Runner.SaveResumeConfig calls goconfig.Save, which eventually calls http.expectContinueReader.Close
+      #27: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http.expectContinueReader.Read
+      #28: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which calls http.gzipReader.Close
+      #29: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http.gzipReader.Read
+      #30: cmd/integration-test/integration-test.go:37:17: integration.main calls fmt.Fprintf, which eventually calls http.loggingConn.Read
+      #31: cmd/integration-test/integration-test.go:37:17: integration.main calls fmt.Fprintf, which calls http.loggingConn.Write
+      #32: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http.maxBytesReader.Read
+      #33: internal/testutils/integration.go:38:21: testutils.RunDnsxBinaryAndGetResults calls exec.Command, which eventually calls http.onceCloseListener.Close
+      #34: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http.persistConn.Read
+      #35: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http.persistConnWriter.ReadFrom
+      #36: internal/runner/runner.go:656:24: runner.Runner.HandleOutput calls bufio.Writer.WriteString, which eventually calls http.persistConnWriter.Write
+      #37: internal/runner/runner.go:547:22: runner.Runner.SaveResumeConfig calls goconfig.Save, which eventually calls http.readTrackingBody.Close
+      #38: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http.readTrackingBody.Read
+      #39: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http.readWriteCloserBody.Read
+      #40: cmd/integration-test/integration-test.go:37:17: integration.main calls fmt.Fprintf, which calls http.response.Write
+      #41: internal/runner/options.go:309:69: runner.ParseOptions calls errkit.ErrorX.Error, which calls http.transportReadFromServerError.Error
+
+Vulnerability #3: GO-2026-6612
+    Double flow control refund on HTTP/2 server streams in net/http
+  More info: https://pkg.go.dev/vuln/GO-2026-6612
+  Module: golang.org/x/net
+    Found in: golang.org/x/net@v0.55.0
+    Fixed in: golang.org/x/net@v0.60.0
+    Example traces found:
+      #1: internal/runner/banner.go:5:2: runner.init calls pdcp.init, which eventually calls http2.ConfigureTransport
+      #2: benchmarks/bench_main.go:145:25: benchmarks.main calls fmt.Sprintf, which eventually calls http2.FrameType.String
+      #3: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.Transport.RoundTrip
+
+  Standard library
+    Found in: net/http/internal/http2@go1.27.1
+    Fixed in: net/http/internal/http2@go1.27.2
+    Example traces found:
+      #1: internal/runner/runner.go:422:16: runner.Runner.prepareInput calls clistats.Statistics.Start, which eventually calls http2.Server.ServeConn
+      #2: internal/runner/runner.go:422:16: runner.Runner.prepareInput calls clistats.Statistics.Start, which eventually calls http2.Server.ServeConn
+      #3: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.requestBody.Close
+      #4: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.requestBody.Close
+      #5: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.requestBody.Read
+      #6: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.requestBody.Read
+
+Vulnerability #4: GO-2026-6611
+    Excessive CPU consumption from repeated initial window changes in net/http
+  More info: https://pkg.go.dev/vuln/GO-2026-6611
+  Module: golang.org/x/net
+    Found in: golang.org/x/net@v0.55.0
+    Fixed in: golang.org/x/net@v0.60.0
+    Example traces found:
+      #1: internal/runner/banner.go:5:2: runner.init calls pdcp.init, which eventually calls http2.ConfigureTransport
+      #2: benchmarks/bench_main.go:145:25: benchmarks.main calls fmt.Sprintf, which eventually calls http2.FrameType.String
+      #3: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.Transport.RoundTrip
+
+  Standard library
+    Found in: net/http/internal/http2@go1.27.1
+    Fixed in: net/http/internal/http2@go1.27.2
+    Example traces found:
+      #1: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.NetHTTPClientConn.Close
+      #2: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.NetHTTPClientConn.Close
+      #3: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.NetHTTPClientConn.RoundTrip
+      #4: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.NetHTTPClientConn.RoundTrip
+      #5: internal/runner/runner.go:573:21: runner.Runner.run calls clistats.Statistics.Stop, which eventually calls http2.Server.GracefulShutdown
+      #6: internal/runner/runner.go:573:21: runner.Runner.run calls clistats.Statistics.Stop, which eventually calls http2.Server.GracefulShutdown
+      #7: internal/runner/runner.go:422:16: runner.Runner.prepareInput calls clistats.Statistics.Start, which eventually calls http2.Server.ServeConn
+      #8: internal/runner/runner.go:422:16: runner.Runner.prepareInput calls clistats.Statistics.Start, which eventually calls http2.Server.ServeConn
+      #9: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.Transport.AddConn
+      #10: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.Transport.AddConn
+      #11: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.Transport.CloseIdleConnections
+      #12: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.Transport.CloseIdleConnections
+      #13: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.Transport.NewClientConn
+      #14: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.Transport.NewClientConn
+      #15: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.Transport.RoundTrip
+      #16: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.Transport.RoundTrip
+      #17: internal/runner/runner.go:656:24: runner.Runner.HandleOutput calls bufio.Writer.WriteString, which eventually calls http2.bufferedWriterTimeoutWriter.Write
+      #18: internal/runner/runner.go:656:24: runner.Runner.HandleOutput calls bufio.Writer.WriteString, which eventually calls http2.bufferedWriterTimeoutWriter.Write
+      #19: internal/runner/runner.go:656:24: runner.Runner.HandleOutput calls bufio.Writer.WriteString, which eventually calls http2.chunkWriter.Write
+      #20: internal/runner/runner.go:656:24: runner.Runner.HandleOutput calls bufio.Writer.WriteString, which eventually calls http2.chunkWriter.Write
+      #21: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which calls http2.gzipReader.Close
+      #22: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which calls http2.gzipReader.Close
+      #23: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.gzipReader.Read
+      #24: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.gzipReader.Read
+      #25: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.requestBody.Close
+      #26: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.requestBody.Close
+      #27: cmd/integration-test/integration-test.go:37:17: integration.main calls fmt.Fprintf, which calls http2.responseWriter.Write
+      #28: cmd/integration-test/integration-test.go:37:17: integration.main calls fmt.Fprintf, which calls http2.responseWriter.Write
+      #29: internal/runner/runner.go:422:16: runner.Runner.prepareInput calls clistats.Statistics.Start, which eventually calls http2.responseWriter.WriteHeader
+      #30: internal/runner/runner.go:422:16: runner.Runner.prepareInput calls clistats.Statistics.Start, which eventually calls http2.responseWriter.WriteHeader
+      #31: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.responseWriter.WriteString
+      #32: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.responseWriter.WriteString
+      #33: internal/runner/runner.go:656:24: runner.Runner.HandleOutput calls bufio.Writer.WriteString, which eventually calls http2.stickyErrWriter.Write
+      #34: internal/runner/runner.go:656:24: runner.Runner.HandleOutput calls bufio.Writer.WriteString, which eventually calls http2.stickyErrWriter.Write
+      #35: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which calls http2.transportResponseBody.Close
+      #36: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which calls http2.transportResponseBody.Close
+      #37: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.transportResponseBody.Read
+      #38: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.transportResponseBody.Read
+
+Vulnerability #5: GO-2026-6610
+    HTTP/2 transport accepts malformed framing-related headers in net/http
+  More info: https://pkg.go.dev/vuln/GO-2026-6610
+  Module: golang.org/x/net
+    Found in: golang.org/x/net@v0.55.0
+    Fixed in: golang.org/x/net@v0.60.0
+    Example traces found:
+      #1: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.Transport.RoundTrip
+
+  Standard library
+    Found in: net/http/internal/http2@go1.27.1
+    Fixed in: net/http/internal/http2@go1.27.2
+    Example traces found:
+      #1: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.Transport.AddConn
+      #2: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.Transport.AddConn
+      #3: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.Transport.NewClientConn
+      #4: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.Transport.NewClientConn
+      #5: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.Transport.RoundTrip
+      #6: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.Transport.RoundTrip
+
+Vulnerability #6: GO-2026-6608
+    Memory limit bypass when parsing MIME headers in net/textproto,
+    mime/multipart
+  More info: https://pkg.go.dev/vuln/GO-2026-6608
+  Standard library
+    Found in: net/textproto@go1.27.1
+    Fixed in: net/textproto@go1.27.2
+    Example traces found:
+      #1: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls textproto.Reader.ReadMIMEHeader
+
+Vulnerability #7: GO-2026-6607
+    Reject malformed ECH outer extension references in crypto/tls
+  More info: https://pkg.go.dev/vuln/GO-2026-6607
+  Standard library
+    Found in: crypto/tls@go1.27.1
+    Fixed in: crypto/tls@go1.27.2
+    Example traces found:
+      #1: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls tls.Conn.HandshakeContext
+      #2: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls tls.Conn.Read
+      #3: cmd/integration-test/integration-test.go:37:17: integration.main calls fmt.Fprintf, which calls tls.Conn.Write
+      #4: libs/dnsx/dnsx.go:243:34: dnsx.DNSX.QueryMultiple calls retryabledns.Client.QueryMultiple, which eventually calls tls.Dialer.DialContext
+
+Vulnerability #8: GO-2026-6605
+    HTTP/1 client connection desynchronization after CONNECT rejection in
+    net/http
+  More info: https://pkg.go.dev/vuln/GO-2026-6605
+  Standard library
+    Found in: net/http@go1.27.1
+    Fixed in: net/http@go1.27.2
+    Example traces found:
+      #1: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http.Client.CloseIdleConnections
+      #2: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http.Client.Do
+      #3: internal/runner/options.go:306:76: runner.ParseOptions calls update.GetToolVersionCallback, which calls http.Client.Get
+      #4: internal/runner/runner.go:423:26: runner.Runner.prepareInput calls clistats.Statistics.GetStatResponse, which eventually calls http.Get
+
+Vulnerability #9: GO-2026-6603
+    HTTP/2 server memory exhaustion due to Trailer headers in net/http
+  More info: https://pkg.go.dev/vuln/GO-2026-6603
+  Module: golang.org/x/net
+    Found in: golang.org/x/net@v0.55.0
+    Fixed in: golang.org/x/net@v0.60.0
+    Example traces found:
+      #1: internal/runner/banner.go:5:2: runner.init calls pdcp.init, which eventually calls http2.ConfigureTransport
+      #2: benchmarks/bench_main.go:145:25: benchmarks.main calls fmt.Sprintf, which eventually calls http2.FrameType.String
+      #3: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.Transport.RoundTrip
+
+  Standard library
+    Found in: net/http/internal/http2@go1.27.1
+    Fixed in: net/http/internal/http2@go1.27.2
+    Example traces found:
+      #1: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.NetHTTPClientConn.Close
+      #2: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.NetHTTPClientConn.Close
+      #3: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.NetHTTPClientConn.RoundTrip
+      #4: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.NetHTTPClientConn.RoundTrip
+      #5: internal/runner/runner.go:573:21: runner.Runner.run calls clistats.Statistics.Stop, which eventually calls http2.Server.GracefulShutdown
+      #6: internal/runner/runner.go:573:21: runner.Runner.run calls clistats.Statistics.Stop, which eventually calls http2.Server.GracefulShutdown
+      #7: internal/runner/runner.go:422:16: runner.Runner.prepareInput calls clistats.Statistics.Start, which eventually calls http2.Server.ServeConn
+      #8: internal/runner/runner.go:422:16: runner.Runner.prepareInput calls clistats.Statistics.Start, which eventually calls http2.Server.ServeConn
+      #9: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.Transport.AddConn
+      #10: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.Transport.AddConn
+      #11: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.Transport.CloseIdleConnections
+      #12: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.Transport.CloseIdleConnections
+      #13: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.Transport.NewClientConn
+      #14: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.Transport.NewClientConn
+      #15: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.Transport.RoundTrip
+      #16: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.Transport.RoundTrip
+      #17: internal/runner/runner.go:656:24: runner.Runner.HandleOutput calls bufio.Writer.WriteString, which eventually calls http2.bufferedWriterTimeoutWriter.Write
+      #18: internal/runner/runner.go:656:24: runner.Runner.HandleOutput calls bufio.Writer.WriteString, which eventually calls http2.bufferedWriterTimeoutWriter.Write
+      #19: internal/runner/runner.go:656:24: runner.Runner.HandleOutput calls bufio.Writer.WriteString, which eventually calls http2.chunkWriter.Write
+      #20: internal/runner/runner.go:656:24: runner.Runner.HandleOutput calls bufio.Writer.WriteString, which eventually calls http2.chunkWriter.Write
+      #21: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which calls http2.gzipReader.Close
+      #22: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which calls http2.gzipReader.Close
+      #23: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.gzipReader.Read
+      #24: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.gzipReader.Read
+      #25: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.requestBody.Close
+      #26: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.requestBody.Close
+      #27: cmd/integration-test/integration-test.go:37:17: integration.main calls fmt.Fprintf, which calls http2.responseWriter.Write
+      #28: cmd/integration-test/integration-test.go:37:17: integration.main calls fmt.Fprintf, which calls http2.responseWriter.Write
+      #29: internal/runner/runner.go:422:16: runner.Runner.prepareInput calls clistats.Statistics.Start, which eventually calls http2.responseWriter.WriteHeader
+      #30: internal/runner/runner.go:422:16: runner.Runner.prepareInput calls clistats.Statistics.Start, which eventually calls http2.responseWriter.WriteHeader
+      #31: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.responseWriter.WriteString
+      #32: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.responseWriter.WriteString
+      #33: internal/runner/runner.go:656:24: runner.Runner.HandleOutput calls bufio.Writer.WriteString, which eventually calls http2.stickyErrWriter.Write
+      #34: internal/runner/runner.go:656:24: runner.Runner.HandleOutput calls bufio.Writer.WriteString, which eventually calls http2.stickyErrWriter.Write
+      #35: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which calls http2.transportResponseBody.Close
+      #36: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which calls http2.transportResponseBody.Close
+      #37: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.transportResponseBody.Read
+      #38: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls http2.transportResponseBody.Read
+
+Vulnerability #10: GO-2026-5970
+    Infinite loop on invalid input in golang.org/x/text
+  More info: https://pkg.go.dev/vuln/GO-2026-5970
+  Module: golang.org/x/text
+    Found in: golang.org/x/text@v0.37.0
+    Fixed in: golang.org/x/text@v0.39.0
+    Example traces found:
+      #1: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls norm.Form.Bytes
+      #2: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls norm.Form.IsNormalString
+      #3: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls norm.Form.QuickSpan
+      #4: internal/runner/options.go:289:47: runner.ParseOptions calls pdcp.PDCPCredHandler.ValidateAPIKey, which eventually calls norm.Form.String
+
+Vulnerability #11: GO-2026-5932
+    The golang.org/x/crypto/openpgp package is unmaintained, unsafe by design,
+    and has known security issues
+  More info: https://pkg.go.dev/vuln/GO-2026-5932
+  Module: golang.org/x/crypto
+    Found in: golang.org/x/crypto@v0.52.0
+    Fixed in: N/A
+    Example traces found:
+      #1: internal/runner/banner.go:6:2: runner.init calls update.init, which eventually calls armor.init
+      #2: internal/runner/banner.go:6:2: runner.init calls update.init, which eventually calls elgamal.init
+      #3: internal/runner/banner.go:6:2: runner.init calls update.init, which eventually calls errors.init
+      #4: internal/runner/banner.go:6:2: runner.init calls update.init, which eventually calls openpgp.init
+      #5: internal/runner/banner.go:6:2: runner.init calls update.init, which eventually calls packet.init
+      #6: internal/runner/banner.go:6:2: runner.init calls update.init, which eventually calls s2k.init
+
+Vulnerability #12: GO-2026-5320
+    Cross-site Scripting (XSS) in github.com/yuin/goldmark
+  More info: https://pkg.go.dev/vuln/GO-2026-5320
+  Module: github.com/yuin/goldmark
+    Found in: github.com/yuin/goldmark@v1.7.4
+    Fixed in: github.com/yuin/goldmark@v1.7.17
+    Example traces found:
+      #1: internal/runner/banner.go:33:53: runner.GetUpdateCallback calls update.GetUpdateToolFromRepoCallback, which eventually calls html.Renderer.renderAutoLink
+      #2: internal/runner/banner.go:33:53: runner.GetUpdateCallback calls update.GetUpdateToolFromRepoCallback, which eventually calls html.Renderer.renderImage
+      #3: internal/runner/banner.go:33:53: runner.GetUpdateCallback calls update.GetUpdateToolFromRepoCallback, which eventually calls html.Renderer.renderLink
+
+Your code is affected by 12 vulnerabilities from 3 modules and the Go standard library.
+This scan also found 2 vulnerabilities in packages you import and 8
+vulnerabilities in modules you require, but your code doesn't appear to call
+these vulnerabilities.
+Use '-show verbose' for more details.
