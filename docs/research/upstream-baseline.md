@@ -10,7 +10,7 @@
 |-------|-------|
 | Módulo Go | `github.com/projectdiscovery/dnsx` |
 | Versão Go declarada (go.mod) | `go 1.25.0` |
-| Go testado neste ambiente | `go1.27.1 android/arm64` (Termux nativo, CGO_ENABLED=1) |
+| Go testado neste ambiente | `go1.27.2 android/arm64` (Termux nativo, CGO_ENABLED=1) |
 | Binário do produto (HyperDNSx) | `hyperdnsx` (não substituir silenciosamente o `dnsx` instalado) |
 | Biblioteca DNS | `github.com/projectdiscovery/retryabledns v1.0.116` |
 | Parser DNS | `github.com/miekg/dns v1.1.72` |

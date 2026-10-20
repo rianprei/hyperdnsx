@@ -8,7 +8,7 @@
 
 | Item | Value |
 |------|-------|
-| Go | `go1.27.1 android/arm64` |
+| Go | `go1.27.2 android/arm64` |
 | GOOS | `android` |
 | GOARCH | `arm64` |
 | CGO_ENABLED | `1` |

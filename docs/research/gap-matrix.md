@@ -53,8 +53,8 @@ Referência: issue upstream #884 (consultar todos os resolvedores) fechada como 
 
 | Recurso | Baseline Upstream | Forks com delta | Concorrentes | Decisão HyperDNSx | Prioridade |
 |---------|-------------------|-----------------|--------------|-------------------|------------|
-| `-auto-wildcard` / `-aw` | Sim (v1.3.0+) | Nenhum | puredns detecção orientada a precisão | Preservar e testar antes de reimplementar | P0 |
-| `-wildcard-domain` / `-wd` | Sim | Nenhum | — | Preservar | P0 |
+| `-auto-wildcard` / `-aw` | Sim (v1.3.0+) | Nenhum | puredns detecção orientada a precisão | Preservado e testado | P0 |
+| `-wildcard-domain` / `-wd` | Sim | Nenhum | — | Preservado | P0 |
 | Múltiplas raízes registráveis e níveis | Básico | Nenhum | puredns multinível | Melhorar cobertura | P1 |
 | Distinguir wildcard global vs subárvore vs CDN/load-balanced | Não | Nenhum | puredns | Implementar | P1 |
 | Comparar respostas repetidas e entre resolvers confiáveis | Não | Nenhum | puredns validação posterior | Implementar | P1 |
@@ -69,7 +69,7 @@ Referência: issue upstream #924 (auto wildcard).
 | Recurso | Baseline Upstream | Forks com delta | Concorrentes | Decisão HyperDNSx | Prioridade |
 |---------|-------------------|-----------------|--------------|-------------------|------------|
 | Cache positivo TTL-aware por RRset | Não | Nenhum | puredns persistência separada | IMPLEMENTADO: TTLCache por host/type/resolver (libs/dnsx) | P1 |
-| Cache negativo (RFC 2308) | Não | Nenhum | — | Implementado via TTL do zero (ttl<=0 expira imediatamente); negativo tratado explicitamente | P1 |
+| Cache negativo (RFC 2308) | Não | Nenhum | — | IMPLEMENTADO via TTL do zero (ttl<=0 expira imediatamente); negativo tratado explicitamente | P1 |
 | Cache on-disk opcional com versão/schema | Não | Nenhum | — | Não implementado (cache apenas em memória) | P2 |
 | Checkpoint/resume versionado e idempotente | `resume.cfg` simples, sem versão | Nenhum | — | Mantido upstream (`resume.cfg`); versionamento não implementado | P1 |
 | Não duplicar resultados na retomada | Não (risco) | Nenhum | — | Implementar | P1 |
@@ -82,7 +82,7 @@ Referência: issue upstream #924 (auto wildcard).
 | console / JSONL / JSON / CSV / TSV | console, JSONL (-json), template, -o | scournomad/dnsx adiciona `-json-file/-jf` | shuffledns NDJSON | JSONL com provenance implementado; CSV/TSV planejado (P1) | P1 |
 | Writers de ciclo de vida estável (abrir uma vez, flush/close garantidos) | Abre uma vez, bufio, defer close | scournomad abre/fecha por resultado (suspeita de vazar descriptors) | — | Mantido (writer aberto uma vez, close via defer no HandleOutput); scournomad padrão de arquivo por resultado NÃO copiado | P0 |
 | Escrita simultânea stdout + múltiplos arquivos | stdout + 1 arquivo (-o) | scournomad: console + jsonl | — | Implementar múltiplos sinks em pipeline único | P1 |
-| JSONL versionado com campos de provenance | JSONL sem campos de provenance | Nenhum | — | Implementar (resolver, transport, RCODE, TTL, latency, attempts, validation, wildcard, raw opcional) | P1 |
+| JSONL versionado com campos de provenance | JSONL sem campos de provenance | Nenhum | — | IMPLEMENTADO (resolver, protocol, latency, attempts, unknown) | P1 |
 | Logs só em stderr; stdout limpo para pipes | Parcial (stats em stderr) | Nenhum | — | Impor rigorosamente | P0 |
 | Sem mistura stdout/stderr em modo -silent | Parcial | Nenhum | — | Impor | P0 |
 | API Go importável com structs estáveis | Não (CLI acoplada) | Nenhum | — | Implementar (FASE 3) | P2 |

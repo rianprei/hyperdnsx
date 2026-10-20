@@ -1,0 +1,22 @@
+=== Symbol Results ===
+
+Vulnerability #1: GO-2026-5932
+    The golang.org/x/crypto/openpgp package is unmaintained, unsafe by design,
+    and has known security issues
+  More info: https://pkg.go.dev/vuln/GO-2026-5932
+  Module: golang.org/x/crypto
+    Found in: golang.org/x/crypto@v0.57.0
+    Fixed in: N/A
+    Example traces found:
+      #1: internal/runner/banner.go:6:2: runner.init calls update.init, which eventually calls armor.init
+      #2: internal/runner/banner.go:6:2: runner.init calls update.init, which eventually calls elgamal.init
+      #3: internal/runner/banner.go:6:2: runner.init calls update.init, which eventually calls errors.init
+      #4: internal/runner/banner.go:6:2: runner.init calls update.init, which eventually calls openpgp.init
+      #5: internal/runner/banner.go:6:2: runner.init calls update.init, which eventually calls packet.init
+      #6: internal/runner/banner.go:6:2: runner.init calls update.init, which eventually calls s2k.init
+
+Your code is affected by 1 vulnerability from 1 module.
+This scan also found 0 vulnerabilities in packages you import and 1
+vulnerability in modules you require, but your code doesn't appear to call these
+vulnerabilities.
+Use '-show verbose' for more details.

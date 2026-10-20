@@ -76,24 +76,3 @@ func TestRunner_timeout_respected(t *testing.T) {
 		t.Fatal("runner did not complete within 5s (possible timeout/hang)")
 	}
 }
-
-// ── Skipped tests (require real UDP DNS server) ────────────────────────────
-
-// TestRunner_rateLimitGlobal_throttlesQueries tests that the global rate
-// limit throttles queries. It is skipped because retryabledns cannot reach
-// local UDP DNS servers in this Termux/Android environment.
-func TestRunner_rateLimitGlobal_throttlesQueries(t *testing.T) {
-	t.Skip("requires a real UDP DNS server that responds; not runnable in this Termux/Android env")
-}
-
-// TestRunner_rrsetDifferences_acrossResolvers tests that different answers
-// from different resolvers are preserved. Skipped for same reason.
-func TestRunner_rrsetDifferences_acrossResolvers(t *testing.T) {
-	t.Skip("requires a real UDP DNS server that responds; not runnable in this Termux/Android env")
-}
-
-// TestRunner_wildcardMultiLevel tests wildcard detection across levels.
-// Skipped for same reason.
-func TestRunner_wildcardMultiLevel(t *testing.T) {
-	t.Skip("requires a real UDP DNS server that responds; not runnable in this Termux/Android env")
-}
