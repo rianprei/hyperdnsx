@@ -9,3 +9,5 @@ cmd/functional-test/dnsx
 cmd/functional-test/log.txt
 cmd/functional-test/*.cfg
 .vscode/
+/hyperx
+/dnsx
