@@ -124,7 +124,7 @@ pipeline. Each row maps a surveyed fork feature to its integration point here.
 | Custom Wappalyzer fingerprint file | xiaoyaochen | Planned | tech-detect option |
 | vhost / custom-Host probing | jsifuentes | Planned | target fan-out |
 | CPE (→CVE) derivation | securifera, CarlosCommits | Planned | enrich stage |
-| JS-file / copyright / custom-regex extraction | yabeow, nyxgeek, b3r1ch | Planned | body-extract stage |
+| JS-file / email / custom-regex extraction | yabeow, nyxgeek, b3r1ch | **Done** (`-extract-js`, `-extract-emails`, `-extract-regex`) | `extract.go` |
 | HTML / CSV report output | P1kAju | Planned | output sinks |
 | Result storage (MongoDB) | xiaoyaochen | Planned (opt-in) | output sink |
 | HTTP/2 fallback control | hetbhatt2807, innerpeace609 | Planned | `ProbeConfig` |
