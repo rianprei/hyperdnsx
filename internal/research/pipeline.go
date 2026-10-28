@@ -16,6 +16,9 @@ type PipelineConfig struct {
 	// Resolve enables the DNS stage. When false, targets are probed directly
 	// (useful when inputs are already URLs/IPs).
 	Resolve bool
+	// CDNCheck enriches resolved hosts with CDN/WAF classification, reusing the
+	// httpx engine's cdncheck. Requires Resolve.
+	CDNCheck bool
 }
 
 // Pipeline fuses the DNS resolution engine with the HTTP probe engine. A
@@ -86,6 +89,9 @@ func (p *Pipeline) process(raw string, emit func(Result)) {
 			}
 			emit(base)
 			return
+		}
+		if p.cfg.CDNCheck && len(base.A) > 0 {
+			base.IsCDN, base.CDNName, base.CDNType = p.prober.CheckCDN(base.A[0])
 		}
 	}
 

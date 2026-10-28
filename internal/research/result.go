@@ -23,6 +23,9 @@ type Result struct {
 	AAAA        []string `json:"aaaa,omitempty"`
 	CNAME       []string `json:"cname,omitempty"`
 	DNSResolver string   `json:"dns_resolver,omitempty"`
+	IsCDN       bool     `json:"cdn,omitempty"`
+	CDNName     string   `json:"cdn_name,omitempty"`
+	CDNType     string   `json:"cdn_type,omitempty"`
 
 	// --- HTTP stage ---
 	URL           string `json:"url,omitempty"`

@@ -113,6 +113,17 @@ func (p *Prober) Probe(base Result, targetURL, scheme, port string) Result {
 	return out
 }
 
+// CheckCDN reports whether ip belongs to a known CDN/WAF/cloud range, reusing
+// the httpx engine's built-in cdncheck. Errors are treated as "not a CDN"
+// rather than propagated: CDN classification is best-effort enrichment.
+func (p *Prober) CheckCDN(ip string) (bool, string, string) {
+	isCDN, name, cdnType, err := p.engine.CdnCheck(ip)
+	if err != nil {
+		return false, "", ""
+	}
+	return isCDN, name, cdnType
+}
+
 // mapTLS projects the tlsx client response into the compact TLSInfo record.
 func mapTLS(d *clients.Response) *TLSInfo {
 	info := &TLSInfo{

@@ -44,6 +44,7 @@ type options struct {
 	tlsImpersonate  string
 	randomAgent     bool
 	noResolve       bool
+	cdnCheck        bool
 	extractJS       bool
 	extractEmails   bool
 	extractRegex    string
@@ -109,6 +110,7 @@ func main() {
 		Threads:        opts.threads,
 		DefaultSchemes: schemeList(opts.schemes),
 		Resolve:        !opts.noResolve,
+		CDNCheck:       opts.cdnCheck,
 	})
 
 	writer, closeWriter, err := outputWriter(opts.output)
@@ -144,6 +146,7 @@ func parseOptions() *options {
 		fs.StringVar(&o.tlsImpersonate, "tls-impersonate", "", "ClientHello profile to impersonate (e.g. chrome)"),
 		fs.BoolVar(&o.randomAgent, "random-agent", false, "use a random User-Agent per request"),
 		fs.BoolVar(&o.noResolve, "no-resolve", false, "skip the DNS stage and probe targets directly"),
+		fs.BoolVar(&o.cdnCheck, "cdn", false, "classify resolved hosts as CDN/WAF/cloud (reuses httpx cdncheck)"),
 	)
 	fs.CreateGroup("extract", "Extract",
 		fs.BoolVar(&o.extractJS, "extract-js", false, "extract referenced .js files from responses"),

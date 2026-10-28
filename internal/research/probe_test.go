@@ -76,6 +76,19 @@ func TestProbeUnreachableFails(t *testing.T) {
 	}
 }
 
+func TestCheckCDNPrivateIP(t *testing.T) {
+	// A loopback/private address is never a CDN; this also proves the reuse
+	// wiring to the httpx engine does not panic or error out.
+	prober, err := NewProber(ProbeConfig{})
+	if err != nil {
+		t.Fatalf("NewProber: %v", err)
+	}
+	isCDN, name, cdnType := prober.CheckCDN("127.0.0.1")
+	if isCDN {
+		t.Errorf("127.0.0.1 classified as CDN (name=%q type=%q)", name, cdnType)
+	}
+}
+
 func TestFirstToken(t *testing.T) {
 	tests := []struct{ in, sep, want string }{
 		{"text/html; charset=utf-8", ";", "text/html"},

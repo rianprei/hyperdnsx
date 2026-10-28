@@ -119,7 +119,8 @@ pipeline. Each row maps a surveyed fork feature to its integration point here.
 | Headless JS-runtime tech detect (React/Vite/TanStack) | CarlosCommits, dkarv | Planned | new `probe` option + chromedp sink |
 | Response dedup (simhash + LSH) | kno-com | Planned | post-emit `internal/research/dedup` |
 | Pluggable auth providers | kno-com | Planned | `ProbeConfig.Auth` |
-| WAF detection | l0ners | Planned | `probe.go` enrich stage |
+| CDN/WAF-range classification | l0ners, atoz-project | **Done** (`-cdn`, reuses httpx cdncheck) | `probe.go` `CheckCDN` |
+| Active WAF fingerprinting | l0ners | Planned | `probe.go` enrich stage |
 | Recog fingerprint-DB matching | tracertea | Planned | tech-detect sink |
 | Custom Wappalyzer fingerprint file | xiaoyaochen | Planned | tech-detect option |
 | vhost / custom-Host probing | jsifuentes | Planned | target fan-out |
