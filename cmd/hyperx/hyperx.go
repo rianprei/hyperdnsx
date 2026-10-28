@@ -47,7 +47,10 @@ type options struct {
 	cdnCheck        bool
 	wafDetect       bool
 	techDetect      bool
+	dedup           bool
+	dedupThreshold  int
 	hostHeader      string
+	headers         string
 	extractJS       bool
 	extractEmails   bool
 	extractRegex    string
@@ -90,10 +93,12 @@ func main() {
 		TLSImpersonate:  opts.tlsImpersonate,
 		RandomAgent:     opts.randomAgent,
 		Threads:         opts.threads,
+		CustomHeaders:   parseHeaders(opts.headers),
 		Extractor:       extractor,
 		HostHeader:      opts.hostHeader,
 		WAFDetect:       opts.wafDetect,
 		TechDetect:      opts.techDetect,
+		Dedup:           opts.dedup,
 	})
 	if err != nil {
 		gologger.Fatal().Msgf("could not init probe engine: %s", err)
@@ -112,11 +117,16 @@ func main() {
 		}
 	}
 
+	var deduper *research.Deduper
+	if opts.dedup {
+		deduper = research.NewDeduper(opts.dedupThreshold)
+	}
 	pipeline := research.NewPipeline(resolver, prober, research.PipelineConfig{
 		Threads:        opts.threads,
 		DefaultSchemes: schemeList(opts.schemes),
 		Resolve:        !opts.noResolve,
 		CDNCheck:       opts.cdnCheck,
+		Deduper:        deduper,
 	})
 
 	writer, closeWriter, err := outputWriter(opts.output)
@@ -151,11 +161,16 @@ func parseOptions() *options {
 		fs.BoolVar(&o.tlsGrab, "tls-grab", false, "grab TLS certificate + JA3/JARM data"),
 		fs.StringVar(&o.tlsImpersonate, "tls-impersonate", "", "ClientHello profile to impersonate (e.g. chrome)"),
 		fs.BoolVar(&o.randomAgent, "random-agent", false, "use a random User-Agent per request"),
+		fs.StringVarP(&o.headers, "header", "H", "", "custom headers for auth/probing (comma-separated 'Name: value')"),
 		fs.BoolVar(&o.noResolve, "no-resolve", false, "skip the DNS stage and probe targets directly"),
 		fs.BoolVar(&o.cdnCheck, "cdn", false, "classify resolved hosts as CDN/WAF/cloud (reuses httpx cdncheck)"),
 		fs.BoolVar(&o.wafDetect, "waf", false, "fingerprint WAF/security products from response evidence"),
-		fs.BoolVarP(&o.techDetect, "tech-detect", "td", false, "fingerprint technologies/stack via Wappalyzer (static)"),
+		fs.BoolVarP(&o.techDetect, "tech-detect", "td", false, "fingerprint technologies/stack via Wappalyzer (static); also emits CPEs"),
 		fs.StringVar(&o.hostHeader, "host-header", "", "override the Host header on every probe (vhost)"),
+	)
+	fs.CreateGroup("dedup", "Dedup",
+		fs.BoolVar(&o.dedup, "dedup", false, "suppress near-duplicate response bodies (simhash)"),
+		fs.IntVar(&o.dedupThreshold, "dedup-threshold", 5, "max Hamming distance treated as duplicate"),
 	)
 	fs.CreateGroup("extract", "Extract",
 		fs.BoolVar(&o.extractJS, "extract-js", false, "extract referenced .js files from responses"),
@@ -288,6 +303,29 @@ func schemeList(s string) []string {
 		return []string{"https", "http"}
 	}
 	return parsed
+}
+
+// parseHeaders parses comma-separated "Name: value" pairs into a header map.
+// Reuses the engine's CustomHeaders, covering basic/bearer/cookie auth (all of
+// which are just headers) without a dedicated auth-provider abstraction.
+func parseHeaders(s string) map[string][]string {
+	out := map[string][]string{}
+	for _, pair := range splitComma(s) {
+		idx := strings.Index(pair, ":")
+		if idx <= 0 {
+			continue
+		}
+		name := strings.TrimSpace(pair[:idx])
+		value := strings.TrimSpace(pair[idx+1:])
+		if name == "" {
+			continue
+		}
+		out[name] = append(out[name], value)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func splitComma(s string) []string {

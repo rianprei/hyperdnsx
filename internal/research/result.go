@@ -44,6 +44,8 @@ type Result struct {
 	HostHeader    string   `json:"host_header,omitempty"`
 	WAF           string   `json:"waf,omitempty"`
 	Tech          []string `json:"tech,omitempty"`
+	CPE           []string `json:"cpe,omitempty"`
+	BodyHash      string   `json:"body_hash,omitempty"`
 
 	// --- TLS (populated when -tls-grab and the endpoint is HTTPS) ---
 	TLS *TLSInfo `json:"tls,omitempty"`
@@ -56,6 +58,11 @@ type Result struct {
 	// --- status ---
 	Failed bool   `json:"failed,omitempty"`
 	Error  string `json:"error,omitempty"`
+
+	// simhash is the 64-bit content fingerprint used for near-duplicate
+	// suppression. Unexported: it never serializes; BodyHash carries the hex
+	// form into output when dedup is enabled.
+	simhash uint64
 }
 
 // TLSInfo is a compact projection of the certificate data recovered during the

@@ -37,8 +37,12 @@ type ProbeConfig struct {
 	WAFDetect bool
 	// TechDetect runs Wappalyzer technology fingerprinting (static, no browser)
 	// on each response, recovering the tech-detect capability from the fork
-	// ecosystem by reusing the wappalyzergo library httpx itself uses.
+	// ecosystem by reusing the wappalyzergo library httpx itself uses. When on,
+	// CPEs derived from the matched technologies are also emitted.
 	TechDetect bool
+	// Dedup computes a per-response simhash so the pipeline can suppress
+	// near-duplicate bodies (the kno-com fork capability).
+	Dedup bool
 }
 
 // Prober wraps the httpx probing engine. It is safe for concurrent use: the
@@ -51,6 +55,7 @@ type Prober struct {
 	hostHeader string
 	wafDetect  bool
 	wappalyze  *wappalyzer.Wappalyze
+	dedup      bool
 }
 
 // NewProber builds a Prober from cfg, layering overrides onto httpx defaults.
@@ -88,6 +93,7 @@ func NewProber(cfg ProbeConfig) (*Prober, error) {
 		extractor:  cfg.Extractor,
 		hostHeader: cfg.HostHeader,
 		wafDetect:  cfg.WAFDetect,
+		dedup:      cfg.Dedup,
 	}
 	if cfg.TechDetect {
 		wappalyze, err := wappalyzer.New()
@@ -141,7 +147,14 @@ func (p *Prober) Probe(base Result, targetURL, scheme, port string) Result {
 		out.WAF = DetectWAF(resp.Headers, resp.Data)
 	}
 	if p.wappalyze != nil {
-		out.Tech = sortedKeys(p.wappalyze.Fingerprint(resp.Headers, resp.Data))
+		info := p.wappalyze.FingerprintWithInfo(resp.Headers, resp.Data)
+		out.Tech, out.CPE = techAndCPE(info)
+	}
+	if p.dedup {
+		out.simhash = Simhash(resp.Data)
+		if out.simhash != 0 {
+			out.BodyHash = fmt.Sprintf("%016x", out.simhash)
+		}
 	}
 	if p.extractor != nil && len(resp.Data) > 0 {
 		ex := p.extractor.Extract(targetURL, resp.Data)
@@ -189,17 +202,25 @@ func mapTLS(d *clients.Response) *TLSInfo {
 	return info
 }
 
-// sortedKeys returns the map keys as a sorted slice (stable tech output).
-func sortedKeys(m map[string]struct{}) []string {
-	if len(m) == 0 {
-		return nil
+// techAndCPE splits a Wappalyzer info map into a sorted technology-name slice
+// and a sorted, deduplicated slice of non-empty CPEs (securifera capability).
+func techAndCPE(info map[string]wappalyzer.AppInfo) (tech []string, cpe []string) {
+	if len(info) == 0 {
+		return nil, nil
 	}
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
+	cpeSet := make(map[string]struct{})
+	for name, app := range info {
+		tech = append(tech, name)
+		if app.CPE != "" {
+			cpeSet[app.CPE] = struct{}{}
+		}
 	}
-	sort.Strings(out)
-	return out
+	sort.Strings(tech)
+	for c := range cpeSet {
+		cpe = append(cpe, c)
+	}
+	sort.Strings(cpe)
+	return tech, cpe
 }
 
 // firstToken returns the substring before the first occurrence of sep, trimmed.

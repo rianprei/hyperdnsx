@@ -19,6 +19,10 @@ type PipelineConfig struct {
 	// CDNCheck enriches resolved hosts with CDN/WAF classification, reusing the
 	// httpx engine's cdncheck. Requires Resolve.
 	CDNCheck bool
+	// Deduper, when non-nil, suppresses near-duplicate response bodies by
+	// simhash proximity. Requires the prober's Dedup option so results carry a
+	// body simhash.
+	Deduper *Deduper
 }
 
 // Pipeline fuses the DNS resolution engine with the HTTP probe engine. A
@@ -48,8 +52,11 @@ func (p *Pipeline) Run(inputs []string, emit func(Result)) {
 	var emitMu sync.Mutex
 	safeEmit := func(r Result) {
 		emitMu.Lock()
+		defer emitMu.Unlock()
+		if p.cfg.Deduper != nil && !r.Failed && p.cfg.Deduper.Seen(r.simhash) {
+			return // near-duplicate body already emitted
+		}
 		emit(r)
-		emitMu.Unlock()
 	}
 
 	jobs := make(chan string)

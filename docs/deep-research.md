@@ -43,11 +43,14 @@ hyperx -l targets.txt -follow-redirects -tls-impersonate chrome -o out.jsonl -js
 | `-tls-grab` | off | grab TLS certificate + JA3/JARM data |
 | `-tls-impersonate` | — | ClientHello profile to impersonate (e.g. `chrome`) |
 | `-random-agent` | off | random User-Agent per request |
+| `-H, -header` | — | custom headers for auth/probing (comma-separated `Name: value`) |
 | `-no-resolve` | off | skip the DNS stage, probe targets directly |
 | `-cdn` | off | classify resolved hosts as CDN/WAF/cloud (reuses httpx cdncheck) |
 | `-waf` | off | fingerprint WAF/security products from response evidence |
-| `-td, -tech-detect` | off | fingerprint technologies/stack via Wappalyzer (static) |
+| `-td, -tech-detect` | off | fingerprint technologies/stack via Wappalyzer (static); also emits CPEs |
 | `-host-header` | — | override the Host header on every probe (vhost) |
+| `-dedup` | off | suppress near-duplicate response bodies (simhash) |
+| `-dedup-threshold` | 5 | max Hamming distance treated as duplicate |
 | `-extract-js` | off | extract referenced `.js` files (absolute URLs) |
 | `-extract-emails` | off | extract email addresses from responses |
 | `-extract-regex` | — | custom extraction regexes (comma-separated `name=pattern`) |
@@ -124,21 +127,29 @@ pipeline. Each row maps a surveyed fork feature to its integration point here.
 | Chrome ClientHello impersonation | rabb1t-dev | **Done** (`-tls-impersonate`) | `ProbeConfig.TLSImpersonate` |
 | Random User-Agent | upstream | **Done** (`-random-agent`) | `ProbeConfig.RandomAgent` |
 | Technology/stack detection (static Wappalyzer) | CarlosCommits, dkarv, xiaoyaochen | **Done** (`-tech-detect`/`-td`, reuses wappalyzergo) | `probe.go` |
-| Headless JS-runtime tech detect (React/Vite/TanStack) | CarlosCommits, dkarv | Planned (needs chromedp) | browser sink |
-| Response dedup (simhash + LSH) | kno-com | Planned | post-emit `internal/research/dedup` |
-| Pluggable auth providers | kno-com | Planned | `ProbeConfig.Auth` |
+| Response dedup (simhash) | kno-com | **Done** (`-dedup`, `-dedup-threshold`) | `dedup.go` |
+| Technology CPE (→CVE) derivation | securifera, CarlosCommits | **Done** (rides on `-tech-detect`) | `probe.go` `techAndCPE` |
+| Pluggable auth (basic/bearer/cookie) | kno-com | **Done** (`-H` custom headers reuse) | `ProbeConfig.CustomHeaders` |
 | CDN/WAF-range classification | l0ners, atoz-project | **Done** (`-cdn`, reuses httpx cdncheck) | `probe.go` `CheckCDN` |
 | Active WAF fingerprinting | l0ners | **Done** (`-waf`, response-evidence signatures) | `waf.go` |
-| Recog fingerprint-DB matching | tracertea | Planned | tech-detect sink |
-| Custom Wappalyzer fingerprint file | xiaoyaochen | Planned | tech-detect option |
 | vhost / custom-Host probing | jsifuentes | **Done** (`-host-header`) | `probe.go` |
-| CPE (→CVE) derivation | securifera, CarlosCommits | Planned | enrich stage |
 | JS-file / email / custom-regex extraction | yabeow, nyxgeek, b3r1ch | **Done** (`-extract-js`, `-extract-emails`, `-extract-regex`) | `extract.go` |
-| HTML / CSV report output | P1kAju | Planned | output sinks |
-| Result storage (MongoDB) | xiaoyaochen | Planned (opt-in) | output sink |
-| HTTP/2 fallback control | hetbhatt2807, innerpeace609 | Planned | `ProbeConfig` |
-| SSRF guard (cert CommonName) | d11testing | Planned (hardening) | probe network policy |
-| log4j/JNDI probe | sahruldotid | Planned (opt-in, off by default) | explicit scan module |
+
+### Intentionally not adopted (with rationale)
+
+Per the Ponytail/YAGNI principle (`CLAUDE.md`), these fork capabilities are
+resolved as non-goals rather than left as open scaffolding:
+
+| Capability | Fork | Why not |
+|------------|------|---------|
+| Headless/runtime JS detection | CarlosCommits, dkarv | Needs chromedp + a Chrome binary; not runnable on the Android/ARM64 target. Static Wappalyzer (`-td`) covers most stacks. Revisit only for SPA-only targets on a desktop build. |
+| Recog fingerprint-DB matching | tracertea | Requires bundling Rapid7's large external Recog XML DB; overlaps Wappalyzer for web tech. Service-banner recon is nmap's domain. |
+| Custom Wappalyzer fingerprint file | xiaoyaochen | `wappalyzergo` ships an embedded DB and exposes no external-file loader; custom fingerprints would need upstream support. |
+| HTML / CSV report output | P1kAju | JSONL output already pipes to `jq`/CSV tooling; a bespoke renderer is redundant. |
+| Result storage (MongoDB) | xiaoyaochen | JSONL + `mongoimport` already covers storage; adding a DB driver dependency for a sink is redundant. |
+| HTTP/2 fallback control | hetbhatt2807, innerpeace609 | Handled by the httpx engine defaults; no value in a dedicated flag. |
+| SSRF guard | d11testing | The httpx engine already enforces a `NetworkPolicy`; no separate guard needed. |
+| log4j/JNDI injection probe | sahruldotid | Active-exploitation probe; intentionally not shipped by default. Add on explicit request with scope enforcement. |
 
 ## Tests
 
