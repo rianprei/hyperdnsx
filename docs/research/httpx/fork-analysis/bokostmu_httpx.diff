@@ -1,0 +1,349 @@
+diff --git a/README.md b/README.md
+index 073fa01..c1129a3 100644
+--- a/README.md
++++ b/README.md
+@@ -11,6 +11,14 @@
+ [![Docker Images](https://img.shields.io/docker/pulls/projectdiscovery/httpx.svg)](https://hub.docker.com/r/projectdiscovery/httpx)
+ [![Chat on Discord](https://img.shields.io/discord/695645237418131507.svg?logo=discord)](https://discord.gg/KECAGdH)
+ 
++This is a tiny fork of httpx with some added options, a little bug fix and more output in json. 
++
++New Options:body-in-json, errors-in-json (includes all domains also the ones that failed in json with error messages for them), start-protocol (to define if we want to start with http or https) and dont-retry-protocol (to stop the default behavior of retrying with http/https).
++
++Bugfixes: If follow-redirects is set, the port is removed in the redirect (e.g. we set port 80 and follow-redirect flag, than https redirect target is now connected to on port 443). If -follow-host-redirects is set, we stop after 10 redirects (as it is default when the flag is not set), before httpx could hang in a redirect loop.
++
++New fields in json output: body and errors, if flags are set. Additionally always redirect url and redirect host, subject org and subject org unit for certificate of the website (in organization field all orgs of the cert chain are listed, so we do not know if thats the org of the website's certificate or the issuer) and domain (which contains the domain that was given as input to httpx).
++
+ httpx is a fast and multi-purpose HTTP toolkit allow to run multiple probers using [retryablehttp](https://github.com/projectdiscovery/retryablehttp-go) library, it is designed to maintain the result reliability with increased threads.
+ 
+ # Resources
+diff --git a/cmd/httpx/httpx.go b/cmd/httpx/httpx.go
+index 3ba617e..697e06e 100644
+--- a/cmd/httpx/httpx.go
++++ b/cmd/httpx/httpx.go
+@@ -56,7 +56,7 @@ func main() {
+ 
+ 	var scanopts scanOptions
+ 	scanopts.Method = options.Method
+-	protocol := "https"
++	protocol := options.StartProtocol
+ 	scanopts.VHost = options.VHost
+ 	scanopts.OutputTitle = options.ExtractTitle
+ 	scanopts.OutputStatusCode = options.StatusCode
+@@ -68,6 +68,10 @@ func main() {
+ 	scanopts.OutputServerHeader = options.OutputServerHeader
+ 	scanopts.OutputWithNoColor = options.NoColor
+ 	scanopts.ResponseInStdout = options.responseInStdout
++	scanopts.BodyInStdout = options.bodyInStdout
++	scanopts.HeaderInStdout = options.headerInStdout
++	scanopts.ErrorsInStdout = options.errorsInStdout
++	scanopts.DontRetry = options.dontRetryProtocol
+ 	scanopts.OutputWebSocket = options.OutputWebSocket
+ 	scanopts.TlsProbe = options.TLSProbe
+ 	scanopts.RequestURI = options.RequestURI
+@@ -97,7 +101,8 @@ func main() {
+ 			defer f.Close()
+ 		}
+ 		for r := range output {
+-			if r.err != nil {
++			// If ErrorsinStdout is not set and we encountered an error skip to not include it in the output
++			if !scanopts.ErrorsInStdout && r.err != nil {
+ 				continue
+ 			}
+ 
+@@ -183,10 +188,16 @@ func process(t string, wg *sizedwaitgroup.SizedWaitGroup, hp *httpx.HTTPX, proto
+ 		}
+ 
+ 		for port := range customport.Ports {
++			thisProtocol := protocol
++			if port == 80 {
++				thisProtocol = "http"
++			}
+ 			wg.Add()
++
+ 			go func(port int) {
+ 				defer wg.Done()
+-				r := analyze(hp, protocol, target, port, &scanopts)
++				// If the port is 80 we should first check for http protocol
++				r := analyze(hp, thisProtocol, target, port, &scanopts)
+ 				output <- r
+ 				if scanopts.TlsProbe && r.TlsData != nil {
+ 					scanopts.TlsProbe = false
+@@ -237,7 +248,7 @@ type scanOptions struct {
+ 	VHost                  bool
+ 	OutputTitle            bool
+ 	OutputStatusCode       bool
+-    OutputLocation         bool
++	OutputLocation         bool
+ 	OutputContentLength    bool
+ 	StoreResponse          bool
+ 	StoreResponseDirectory string
+@@ -245,6 +256,10 @@ type scanOptions struct {
+ 	OutputWebSocket        bool
+ 	OutputWithNoColor      bool
+ 	ResponseInStdout       bool
++	BodyInStdout           bool
++	ErrorsInStdout         bool
++	HeaderInStdout         bool
++	DontRetry              bool
+ 	TlsProbe               bool
+ 	RequestURI             string
+ 	OutputContentType      bool
+@@ -260,14 +275,14 @@ retry:
+ 
+ 	req, err := hp.NewRequest(scanopts.Method, URL)
+ 	if err != nil {
+-		return Result{URL: URL, err: err}
++		return Result{Domain: domain, URL: URL, err: err, ErrorString: err.Error()}
+ 	}
+ 
+ 	hp.SetCustomHeaders(req, hp.CustomHeaders)
+ 
+ 	resp, err := hp.Do(req)
+ 	if err != nil {
+-		if !retried {
++		if !scanopts.DontRetry && !retried {
+ 			if protocol == "https" {
+ 				protocol = "http"
+ 			} else {
+@@ -276,7 +291,7 @@ retry:
+ 			retried = true
+ 			goto retry
+ 		}
+-		return Result{URL: URL, err: err}
++		return Result{Domain: domain, URL: URL, err: err, ErrorString: err.Error()}
+ 	}
+ 
+ 	var fullURL string
+@@ -364,6 +379,17 @@ retry:
+ 		serverResponseRaw = resp.Raw
+ 	}
+ 
++	var responseBody = ""
++	if scanopts.BodyInStdout {
++		responseBody = string(resp.Data)
++	}
++
++	var responseHeader = ""
++	if scanopts.HeaderInStdout {
++		//Does not work right now
++		//responseHeader = string(resp.Headers)
++	}
++
+ 	// check for virtual host
+ 	isvhost := false
+ 	if scanopts.VHost {
+@@ -390,7 +416,10 @@ retry:
+ 	}
+ 
+ 	return Result{
++		Domain:        domain,
+ 		URL:           fullURL,
++		RedirectURL:   resp.RedirectURL,
++		RedirectHost:  resp.RedirectHost,
+ 		ContentLength: resp.ContentLength,
+ 		StatusCode:    resp.StatusCode,
+ 		Location:      resp.GetHeaderPart("Location", ";"),
+@@ -400,6 +429,8 @@ retry:
+ 		VHost:         isvhost,
+ 		WebServer:     serverHeader,
+ 		Response:      serverResponseRaw,
++		Body:          responseBody,
++		Header:        responseHeader,
+ 		WebSocket:     isWebSocket,
+ 		TlsData:       resp.TlsData,
+ 	}
+@@ -407,7 +438,10 @@ retry:
+ 
+ // Result of a scan
+ type Result struct {
++	Domain        string `json:"domain"`
+ 	URL           string `json:"url"`
++	RedirectURL   string `json:"redirect_url"`
++	RedirectHost  string `json:"redirect_host"`
+ 	ContentLength int    `json:"content-length"`
+ 	StatusCode    int    `json:"status-code"`
+ 	Location      string `json:"location"`
+@@ -416,7 +450,10 @@ type Result struct {
+ 	err           error
+ 	VHost         bool           `json:"vhost"`
+ 	WebServer     string         `json:"webserver"`
++	ErrorString   string         `json:"error,omitempty"`
+ 	Response      string         `json:"serverResponse,omitempty"`
++	Body          string         `json:"response_body,omitempty"`
++	Header        string         `json:"response_header,omitempty`
+ 	WebSocket     bool           `json:"websocket,omitempty"`
+ 	ContentType   string         `json:"content-type,omitempty"`
+ 	TlsData       *httpx.TlsData `json:"tls,omitempty"`
+@@ -461,6 +498,10 @@ type Options struct {
+ 	OutputServerHeader        bool
+ 	OutputWebSocket           bool
+ 	responseInStdout          bool
++	bodyInStdout              bool
++	headerInStdout            bool
++	errorsInStdout            bool
++	dontRetryProtocol         bool
+ 	FollowHostRedirects       bool
+ 	TLSProbe                  bool
+ 	RequestURI                string
+@@ -473,6 +514,7 @@ type Options struct {
+ 	filterStatusCode          []int
+ 	OutputFilterContentLength string
+ 	filterContentLength       []int
++	StartProtocol             string
+ }
+ 
+ // ParseOptions parses the command line options for application
+@@ -505,6 +547,9 @@ func ParseOptions() *Options {
+ 	flag.BoolVar(&options.OutputServerHeader, "web-server", false, "Extracts server header")
+ 	flag.BoolVar(&options.OutputWebSocket, "websocket", false, "Prints out if the server exposes a websocket")
+ 	flag.BoolVar(&options.responseInStdout, "response-in-json", false, "Server response directly in the tool output (-json only)")
++	flag.BoolVar(&options.bodyInStdout, "body-in-json", false, "Server response body directly in the tool output (-json only)")
++	flag.BoolVar(&options.errorsInStdout, "errors-in-json", false, "If a request fails, the error message is included in the tool output (-json only)")
++	flag.BoolVar(&options.dontRetryProtocol, "dont-retry-protocol", false, "If set, if https/http connection fails, no retry with other protocol is attempted")
+ 	flag.BoolVar(&options.TLSProbe, "tls-probe", false, "Send HTTP probes on the extracted TLS domains")
+ 	flag.StringVar(&options.RequestURI, "path", "", "Request path/file (example '/api')")
+ 	flag.BoolVar(&options.OutputContentType, "content-type", false, "Extracts content-type")
+@@ -512,6 +557,7 @@ func ParseOptions() *Options {
+ 	flag.StringVar(&options.OutputMatchStatusCode, "ml", "", "Match content length")
+ 	flag.StringVar(&options.OutputFilterStatusCode, "fc", "", "Filter status code")
+ 	flag.StringVar(&options.OutputFilterContentLength, "fl", "", "Filter content length")
++	flag.StringVar(&options.StartProtocol, "start-protocol", "https", "The protocol to request first")
+ 	flag.Parse()
+ 
+ 	// Read the inputs and configure the logging
+diff --git a/common/httpx/httpx.go b/common/httpx/httpx.go
+index 002d31c..4c26e37 100644
+--- a/common/httpx/httpx.go
++++ b/common/httpx/httpx.go
+@@ -2,6 +2,7 @@ package httpx
+ 
+ import (
+ 	"crypto/tls"
++	"errors"
+ 	"fmt"
+ 	"io/ioutil"
+ 	"net/http"
+@@ -42,9 +43,20 @@ func New(options *Options) (*HTTPX, error) {
+ 		return http.ErrUseLastResponse // Tell the http client to not follow redirect
+ 	}
+ 
++	// if httpx.Options.FollowRedirects {
++	// 	// Follow redirects
++	// 	redirectFunc = nil
++	// }
++
+ 	if httpx.Options.FollowRedirects {
+-		// Follow redirects
+-		redirectFunc = nil
++		// Follow redirects, but replace/remove port in new request (if http redirects to https)
++		redirectFunc = func(redirectedRequest *http.Request, previousRequest []*http.Request) error {
++			redirectedRequest.URL.Host = strings.Split(redirectedRequest.URL.Host, ":")[0]
++			if len(previousRequest) >= 10 {
++				return errors.New("stopped after 10 redirects")
++			}
++			return nil
++		}
+ 	}
+ 
+ 	if httpx.Options.FollowHostRedirects {
+@@ -56,6 +68,9 @@ func New(options *Options) (*HTTPX, error) {
+ 			if newHost != oldHost {
+ 				return http.ErrUseLastResponse // Tell the http client to not follow redirect
+ 			}
++			if len(previousRequest) >= 10 {
++				return errors.New("stopped after 10 redirects")
++			}
+ 			return nil
+ 
+ 		}
+@@ -134,6 +149,12 @@ func (h *HTTPX) Do(req *retryablehttp.Request) (*Response, error) {
+ 	// number of lines
+ 	resp.Lines = len(strings.Split(respbodystr, "\n"))
+ 
++	// extract the redirect URL
++	resp.RedirectURL = httpresp.Request.URL.String()
++
++	//extract the redirect Host
++	resp.RedirectHost = httpresp.Request.URL.Host
++
+ 	// extracts TLS data if any
+ 	resp.TlsData = h.TlsGrab(httpresp)
+ 
+diff --git a/common/httpx/option.go b/common/httpx/option.go
+index 7e15017..7d31ef9 100644
+--- a/common/httpx/option.go
++++ b/common/httpx/option.go
+@@ -12,10 +12,10 @@ type Options struct {
+ 	// RetryMax is the maximum number of retries
+ 	RetryMax int
+ 
+-	CustomHeaders    map[string]string
+-	FollowRedirects  bool
++	CustomHeaders       map[string]string
++	FollowRedirects     bool
+ 	FollowHostRedirects bool
+-	DefaultUserAgent string
++	DefaultUserAgent    string
+ 
+ 	HttpProxy  string
+ 	SocksProxy string
+diff --git a/common/httpx/response.go b/common/httpx/response.go
+index 8f31a1e..e38ba4d 100644
+--- a/common/httpx/response.go
++++ b/common/httpx/response.go
+@@ -13,6 +13,8 @@ type Response struct {
+ 	Raw           string
+ 	Words         int
+ 	Lines         int
++	RedirectURL   string
++	RedirectHost  string
+ 	TlsData       *TlsData
+ }
+ 
+diff --git a/common/httpx/tls.go b/common/httpx/tls.go
+index a67ef6c..79603ed 100644
+--- a/common/httpx/tls.go
++++ b/common/httpx/tls.go
+@@ -1,6 +1,7 @@
+ package httpx
+ 
+ import (
++	"crypto/x509"
+ 	"net/http"
+ )
+ 
+@@ -11,12 +12,17 @@ type TlsData struct {
+ 	Organization     []string `json:"organization,omitempty"`
+ 	IssuerCommonName []string `json:"issuer_common_name,omitempty"`
+ 	IssuerOrg        []string `json:"issuer_organization,omitempty"`
++	SubjectOrg       []string `json:"subject_org,omitempty"`
++	SubjectOrgUnit   []string `json:"subject_org_unit,omitempty"`
++	ValidCert        bool     `json:"cert_valid"`
+ }
+ 
+ func (h *HTTPX) TlsGrab(r *http.Response) *TlsData {
+ 	if r.TLS != nil {
+ 		var tlsdata TlsData
++		certs := x509.NewCertPool()
+ 		for _, certificate := range r.TLS.PeerCertificates {
++			certs.AddCert(certificate)
+ 			tlsdata.DNSNames = append(tlsdata.DNSNames, certificate.DNSNames...)
+ 			tlsdata.Emails = append(tlsdata.Emails, certificate.EmailAddresses...)
+ 			tlsdata.CommonName = append(tlsdata.CommonName, certificate.Subject.CommonName)
+@@ -24,6 +30,15 @@ func (h *HTTPX) TlsGrab(r *http.Response) *TlsData {
+ 			tlsdata.IssuerOrg = append(tlsdata.IssuerOrg, certificate.Issuer.Organization...)
+ 			tlsdata.IssuerCommonName = append(tlsdata.IssuerCommonName, certificate.Issuer.CommonName)
+ 		}
++		tlsdata.SubjectOrg = r.TLS.PeerCertificates[0].Subject.Organization
++		tlsdata.SubjectOrgUnit = r.TLS.PeerCertificates[0].Subject.OrganizationalUnit
++		//root_certs, err = x509.SystemCertPool()
++		//peer_cert_chain := [][]*x509.Certificate{r.TLS.PeerCertificates}
++		tlsdata.ValidCert = true
++		verOpts := x509.VerifyOptions{Intermediates: certs}
++		if _, err := r.TLS.PeerCertificates[0].Verify(verOpts); err != nil {
++			tlsdata.ValidCert = false
++		}
+ 		return &tlsdata
+ 	}
+ 	return nil

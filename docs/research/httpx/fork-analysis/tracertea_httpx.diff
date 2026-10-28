@@ -1,0 +1,410 @@
+diff --git a/common/hashes/jarmhash.go b/common/hashes/jarmhash.go
+index e1d48d1..6ac0003 100644
+--- a/common/hashes/jarmhash.go
++++ b/common/hashes/jarmhash.go
+@@ -15,13 +15,13 @@ import (
+ 
+ const defaultPort int = 443
+ 
+-var DefualtBackoff = func(r, m int) time.Duration {
++var DefaultBackoff = func(r, m int) time.Duration {
+ 	return time.Second
+ }
+ 
+ type target struct {
+-	Host string
+-	Port int
++	Host    string
++	Port    int
+ 	Retries int
+ 	Backoff func(r, m int) time.Duration
+ }
+@@ -43,7 +43,7 @@ func fingerprint(t target, duration int) string {
+ 			}
+ 			bo := t.Backoff
+ 			if bo == nil {
+-				bo = DefualtBackoff
++				bo = DefaultBackoff
+ 			}
+ 			time.Sleep(bo(n, t.Retries))
+ 			n++
+diff --git a/common/httpx/response.go b/common/httpx/response.go
+index 99f6333..951508d 100644
+--- a/common/httpx/response.go
++++ b/common/httpx/response.go
+@@ -1,6 +1,9 @@
+ package httpx
+ 
+ import (
++	"golang.org/x/net/http/httpguts"
++	"net/textproto"
++	"strconv"
+ 	"strings"
+ 	"time"
+ 
+@@ -8,6 +11,25 @@ import (
+ 	"github.com/projectdiscovery/httputil"
+ )
+ 
++// ToLower returns the lowercase version of s if s is ASCII and printable.
++func ToLower(s string) (lower string, ok bool) {
++	if !IsPrint(s) {
++		return "", false
++	}
++	return strings.ToLower(s), true
++}
++
++// IsPrint returns whether s is ASCII and printable according to
++// https://tools.ietf.org/html/rfc20#section-4.2.
++func IsPrint(s string) bool {
++	for i := 0; i < len(s); i++ {
++		if s[i] < ' ' || s[i] > '~' {
++			return false
++		}
++	}
++	return true
++}
++
+ // Response contains the response to a server
+ type Response struct {
+ 	StatusCode    int
+@@ -102,3 +124,188 @@ func (r *Response) GetChainLastURL() string {
+ 	}
+ 	return ""
+ }
++
++// A Cookie represents an HTTP cookie as sent in the Set-Cookie header of an
++// HTTP response or the Cookie header of an HTTP request.
++//
++// See https://tools.ietf.org/html/rfc6265 for details.
++type Cookie struct {
++	Name  string
++	Value string
++
++	Path       string    // optional
++	Domain     string    // optional
++	Expires    time.Time // optional
++	RawExpires string    // for reading cookies only
++
++	// MaxAge=0 means no 'Max-Age' attribute specified.
++	// MaxAge<0 means delete cookie now, equivalently 'Max-Age: 0'
++	// MaxAge>0 means Max-Age attribute present and given in seconds
++	MaxAge   int
++	Secure   bool
++	HttpOnly bool
++	SameSite SameSite
++	Raw      string
++	Unparsed []string // Raw text of unparsed attribute-value pairs
++}
++
++// A Header represents the key-value pairs in an HTTP header.
++//
++// The keys should be in canonical form, as returned by
++// CanonicalHeaderKey.
++type Header map[string][]string
++
++// Cookies parses and returns the cookies set in the Set-Cookie headers.
++func (r *Response) Cookies() []*Cookie {
++	return readSetCookies(r.Headers)
++}
++
++func parseCookieValue(raw string, allowDoubleQuote bool) (string, bool) {
++	// Strip the quotes, if present.
++	if allowDoubleQuote && len(raw) > 1 && raw[0] == '"' && raw[len(raw)-1] == '"' {
++		raw = raw[1 : len(raw)-1]
++	}
++	for i := 0; i < len(raw); i++ {
++		if !validCookieValueByte(raw[i]) {
++			return "", false
++		}
++	}
++	return raw, true
++}
++
++func validCookieValueByte(b byte) bool {
++	return 0x20 <= b && b < 0x7f && b != '"' && b != ';' && b != '\\'
++}
++
++func isCookieNameValid(raw string) bool {
++	if raw == "" {
++		return false
++	}
++	return strings.IndexFunc(raw, isNotToken) < 0
++}
++
++func isNotToken(r rune) bool {
++	return !httpguts.IsTokenRune(r)
++}
++
++// SameSite allows a server to define a cookie attribute making it impossible for
++// the browser to send this cookie along with cross-site requests. The main
++// goal is to mitigate the risk of cross-origin information leakage, and provide
++// some protection against cross-site request forgery attacks.
++//
++// See https://tools.ietf.org/html/draft-ietf-httpbis-cookie-same-site-00 for details.
++type SameSite int
++
++const (
++	SameSiteDefaultMode SameSite = iota + 1
++	SameSiteLaxMode
++	SameSiteStrictMode
++	SameSiteNoneMode
++)
++
++// readSetCookies parses all "Set-Cookie" values from
++// the header h and returns the successfully parsed Cookies.
++func readSetCookies(h Header) []*Cookie {
++	cookieCount := len(h["Set-Cookie"])
++	if cookieCount == 0 {
++		return []*Cookie{}
++	}
++	cookies := make([]*Cookie, 0, cookieCount)
++	for _, line := range h["Set-Cookie"] {
++		parts := strings.Split(textproto.TrimString(line), ";")
++		if len(parts) == 1 && parts[0] == "" {
++			continue
++		}
++		parts[0] = textproto.TrimString(parts[0])
++		name, value, ok := strings.Cut(parts[0], "=")
++		if !ok {
++			continue
++		}
++		if !isCookieNameValid(name) {
++			continue
++		}
++		value, ok = parseCookieValue(value, true)
++		if !ok {
++			continue
++		}
++		c := &Cookie{
++			Name:  name,
++			Value: value,
++			Raw:   line,
++		}
++		for i := 1; i < len(parts); i++ {
++			parts[i] = textproto.TrimString(parts[i])
++			if len(parts[i]) == 0 {
++				continue
++			}
++
++			attr, val, _ := strings.Cut(parts[i], "=")
++			lowerAttr, isASCII := ToLower(attr)
++			if !isASCII {
++				continue
++			}
++			val, ok = parseCookieValue(val, false)
++			if !ok {
++				c.Unparsed = append(c.Unparsed, parts[i])
++				continue
++			}
++
++			switch lowerAttr {
++			case "samesite":
++				lowerVal, ascii := ToLower(val)
++				if !ascii {
++					c.SameSite = SameSiteDefaultMode
++					continue
++				}
++				switch lowerVal {
++				case "lax":
++					c.SameSite = SameSiteLaxMode
++				case "strict":
++					c.SameSite = SameSiteStrictMode
++				case "none":
++					c.SameSite = SameSiteNoneMode
++				default:
++					c.SameSite = SameSiteDefaultMode
++				}
++				continue
++			case "secure":
++				c.Secure = true
++				continue
++			case "httponly":
++				c.HttpOnly = true
++				continue
++			case "domain":
++				c.Domain = val
++				continue
++			case "max-age":
++				secs, err := strconv.Atoi(val)
++				if err != nil || secs != 0 && val[0] == '0' {
++					break
++				}
++				if secs <= 0 {
++					secs = -1
++				}
++				c.MaxAge = secs
++				continue
++			case "expires":
++				c.RawExpires = val
++				exptime, err := time.Parse(time.RFC1123, val)
++				if err != nil {
++					exptime, err = time.Parse("Mon, 02-Jan-2006 15:04:05 MST", val)
++					if err != nil {
++						c.Expires = time.Time{}
++						break
++					}
++				}
++				c.Expires = exptime.UTC()
++				continue
++			case "path":
++				c.Path = val
++				continue
++			}
++			c.Unparsed = append(c.Unparsed, parts[i])
++		}
++		cookies = append(cookies, c)
++	}
++	return cookies
++}
+diff --git a/runner/options.go b/runner/options.go
+index 509b6bc..35d42e7 100644
+--- a/runner/options.go
++++ b/runner/options.go
+@@ -1,11 +1,6 @@
+ package runner
+ 
+ import (
+-	"math"
+-	"os"
+-	"regexp"
+-	"strings"
+-	"github.com/projectdiscovery/httpx/common/slice"
+ 	"github.com/projectdiscovery/fileutil"
+ 	"github.com/projectdiscovery/goconfig"
+ 	"github.com/projectdiscovery/goflags"
+@@ -16,7 +11,12 @@ import (
+ 	"github.com/projectdiscovery/httpx/common/customlist"
+ 	customport "github.com/projectdiscovery/httpx/common/customports"
+ 	fileutilz "github.com/projectdiscovery/httpx/common/fileutil"
++	"github.com/projectdiscovery/httpx/common/slice"
+ 	"github.com/projectdiscovery/httpx/common/stringz"
++	"math"
++	"os"
++	"regexp"
++	"strings"
+ )
+ 
+ const (
+@@ -228,6 +228,7 @@ type Options struct {
+ 	filterWordsCount          []int
+ 	Hashes                    string
+ 	Jarm                      bool
++	Recog                     bool
+ 	Asn                       bool
+ }
+ 
+@@ -251,6 +252,7 @@ func ParseOptions() *Options {
+ 		flagSet.BoolVar(&options.Favicon, "favicon", false, "display mmh3 hash for '/favicon.ico' file"),
+ 		flagSet.StringVar(&options.Hashes, "hash", "", "display response body hash (supported: md5,mmh3,simhash,sha1,sha256,sha512)"),
+ 		flagSet.BoolVar(&options.Jarm, "jarm", false, "display jarm fingerprint hash"),
++		flagSet.BoolVar(&options.Recog, "recog", false, "display recog fingerprint matches"),
+ 		flagSet.BoolVarP(&options.OutputResponseTime, "response-time", "rt", false, "display response time"),
+ 		flagSet.BoolVarP(&options.OutputLinesCount, "line-count", "lc", false, "display response body line count"),
+ 		flagSet.BoolVarP(&options.OutputWordsCount, "word-count", "wc", false, "display response body word count"),
+diff --git a/runner/runner.go b/runner/runner.go
+index 73c0270..bd762a9 100644
+--- a/runner/runner.go
++++ b/runner/runner.go
+@@ -7,6 +7,7 @@ import (
+ 	"encoding/csv"
+ 	"encoding/json"
+ 	"fmt"
++	"github.com/RumbleDiscovery/recog-go"
+ 	"io/ioutil"
+ 	"net"
+ 	"net/http"
+@@ -1078,6 +1079,36 @@ retry:
+ 		builder.WriteString(fmt.Sprintf(" [%s]", serverHeader))
+ 	}
+ 
++	var recogMatches []RecogCPE
++
++	recogFingerprints, err := recog.LoadFingerprints()
++
++	titleFingerprint := recogFingerprints.MatchAll("html_title.xml", title)
++	if len(titleFingerprint) > 0 {
++		recogCPE := extractCPEs(titleFingerprint, title, "html_title")
++		recogMatches = append(recogMatches, recogCPE)
++	}
++	serverHeaderFingerprint := recogFingerprints.MatchAll("http_header.server", serverHeader)
++	if len(serverHeaderFingerprint) > 0 {
++		recogCPE := extractCPEs(serverHeaderFingerprint, serverHeader, "http_server")
++		recogMatches = append(recogMatches, recogCPE)
++	}
++	wwwAuthenticateHeader := resp.GetHeader("WWW-Authenticate")
++	wwwAuthenticateHeaderFingerprint := recogFingerprints.MatchAll("http_header.wwwauth", wwwAuthenticateHeader)
++	if len(wwwAuthenticateHeaderFingerprint) > 0 {
++		recogCPE := extractCPEs(wwwAuthenticateHeaderFingerprint, wwwAuthenticateHeader, "http_wwwauth")
++		recogMatches = append(recogMatches, recogCPE)
++	}
++
++	extractedCookies := resp.Cookies()
++	for _, cookie := range extractedCookies {
++		cookieHeaderFingerprint := recogFingerprints.MatchAll("http_header.cookie", cookie.Raw)
++		if len(cookieHeaderFingerprint) > 0 {
++			recogCPE := extractCPEs(cookieHeaderFingerprint, cookie.Raw, "http_cookie")
++			recogMatches = append(recogMatches, recogCPE)
++		}
++	}
++
+ 	var serverResponseRaw string
+ 	var request string
+ 	var responseHeader string
+@@ -1293,7 +1324,7 @@ retry:
+ 	}
+ 	jarmhash := ""
+ 	if r.options.Jarm {
+-		jarmhash = hashes.Jarm(fullURL,r.options.Timeout)
++		jarmhash = hashes.Jarm(fullURL, r.options.Timeout)
+ 		builder.WriteString(" [")
+ 		if !scanopts.OutputWithNoColor {
+ 			builder.WriteString(aurora.Magenta(jarmhash).String())
+@@ -1408,12 +1439,26 @@ retry:
+ 		FavIconMMH3:      faviconMMH3,
+ 		Hashes:           hashesMap,
+ 		Jarm:             jarmhash,
++		Recog:            recogMatches,
+ 		Lines:            resp.Lines,
+ 		Words:            resp.Words,
+ 		ASN:              asnResponse,
+ 	}
+ }
+ 
++func extractCPEs(fingerprintMatch []*recog.FingerprintMatch, title string, matchType string) RecogCPE {
++	var cpes []map[string]string
++	for _, match := range fingerprintMatch {
++		cpes = append(cpes, match.Values)
++	}
++	titleRecogCPE := RecogCPE{
++		Match: title,
++		Type:  matchType,
++		CPEs:  cpes,
++	}
++	return titleRecogCPE
++}
++
+ // SaveResumeConfig to file
+ func (r *Runner) SaveResumeConfig() error {
+ 	var resumeCfg ResumeCfg
+@@ -1433,6 +1478,12 @@ func (o AsnResponse) String() string {
+ 	return fmt.Sprintf("%v, %v, %v, %v", o.AsNumber, o.AsName, o.AsCountry, o.AsRange)
+ }
+ 
++type RecogCPE struct {
++	Match string              `json:"match,omitempty" csv:"match"`
++	Type  string              `json:"type,omitempty" csv:"type"`
++	CPEs  []map[string]string `json:"cpes,omitempty" csv:"cpes"`
++}
++
+ // Result of a scan
+ type Result struct {
+ 	Timestamp        time.Time `json:"timestamp,omitempty" csv:"timestamp"`
+@@ -1478,6 +1529,7 @@ type Result struct {
+ 	Lines            int                 `json:"lines" csv:"lines"`
+ 	Words            int                 `json:"words" csv:"words"`
+ 	Jarm             string              `json:"jarm,omitempty" csv:"jarm"`
++	Recog            []RecogCPE          `json:"recog,omitempty" csv:"recog"`
+ }
+ 
+ // JSON the result

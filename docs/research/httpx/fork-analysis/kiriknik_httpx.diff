@@ -1,0 +1,107 @@
+diff --git a/common/httpx/option.go b/common/httpx/option.go
+index bec97ed..63b969b 100644
+--- a/common/httpx/option.go
++++ b/common/httpx/option.go
+@@ -27,6 +27,7 @@ type Options struct {
+ 	MaxRedirects         int
+ 	Unsafe               bool
+ 	TLSGrab              bool
++	OutputSSLCert       bool
+ 	ZTLS                 bool
+ 	// VHOSTs options
+ 	VHostIgnoreStatusCode     bool
+diff --git a/common/httpx/tls.go b/common/httpx/tls.go
+index cd7fd15..73ea3ac 100644
+--- a/common/httpx/tls.go
++++ b/common/httpx/tls.go
+@@ -5,7 +5,7 @@ import (
+ 	"crypto/x509"
+ 	"net"
+ 	"net/http"
+-
++	"strings"
+ 	"github.com/projectdiscovery/tlsx/pkg/tlsx/clients"
+ )
+ 
+@@ -48,6 +48,16 @@ func (h *HTTPX) TLSGrab(r *http.Response) *clients.Response {
+ 	return response
+ }
+ 
++func OutputSSLCert(r *Response) (sslCert string) {
++	// Try to parse the DOM
++	if r.TLSData != nil && r.TLSData.CertificateResponse.SubjectAN!=nil{
++		sslCert := strings.Join(r.TLSData.CertificateResponse.SubjectAN,",")
++		return(sslCert)
++	}
++
++	return ""
++}
++
+ func convertCertificateToResponse(hostname string, cert *x509.Certificate) *clients.CertificateResponse {
+ 	response := &clients.CertificateResponse{
+ 		SubjectAN:    cert.DNSNames,
+diff --git a/runner/options.go b/runner/options.go
+index 6ac0cd9..ad86631 100644
+--- a/runner/options.go
++++ b/runner/options.go
+@@ -57,6 +57,7 @@ type ScanOptions struct {
+ 	ChainInStdout             bool
+ 	TLSProbe                  bool
+ 	CSPProbe                  bool
++	OutputSSLCert       	  bool
+ 	VHostInput                bool
+ 	OutputContentType         bool
+ 	Unsafe                    bool
+@@ -108,6 +109,7 @@ func (s *ScanOptions) Clone() *ScanOptions {
+ 		ChainInStdout:             s.ChainInStdout,
+ 		TLSProbe:                  s.TLSProbe,
+ 		CSPProbe:                  s.CSPProbe,
++		OutputSSLCert:       	   s.OutputSSLCert,
+ 		OutputContentType:         s.OutputContentType,
+ 		Unsafe:                    s.Unsafe,
+ 		Pipeline:                  s.Pipeline,
+@@ -197,6 +199,7 @@ type Options struct {
+ 	OutputMethod              bool
+ 	TLSProbe                  bool
+ 	CSPProbe                  bool
++	OutputSSLCert       	  bool
+ 	OutputContentType         bool
+ 	OutputIP                  bool
+ 	OutputCName               bool
+@@ -354,6 +357,7 @@ func ParseOptions() *Options {
+ 		flagSet.BoolVar(&options.TLSProbe, "tls-probe", false, "send http probes on the extracted TLS domains (dns_name)"),
+ 		flagSet.BoolVar(&options.CSPProbe, "csp-probe", false, "send http probes on the extracted CSP domains"),
+ 		flagSet.BoolVar(&options.TLSGrab, "tls-grab", false, "perform TLS(SSL) data grabbing"),
++		flagSet.BoolVar(&options.OutputSSLCert, "ssl-grab", false, "show ssl certs"),
+ 		flagSet.BoolVar(&options.Pipeline, "pipeline", false, "probe and display server supporting HTTP1.1 pipeline"),
+ 		flagSet.BoolVar(&options.HTTP2Probe, "http2", false, "probe and display server supporting HTTP2"),
+ 		flagSet.BoolVar(&options.VHost, "vhost", false, "probe and display server supporting VHOST"),
+diff --git a/runner/runner.go b/runner/runner.go
+index 23a1b93..22e1892 100644
+--- a/runner/runner.go
++++ b/runner/runner.go
+@@ -210,6 +210,7 @@ func New(options *Options) (*Runner, error) {
+ 	runner.options.protocol = httpx.HTTPorHTTPS
+ 	scanopts.VHost = options.VHost
+ 	scanopts.OutputTitle = options.ExtractTitle
++	scanopts.OutputSSLCert = options.OutputSSLCert
+ 	scanopts.OutputStatusCode = options.StatusCode
+ 	scanopts.OutputLocation = options.Location
+ 	scanopts.OutputContentLength = options.ContentLength
+@@ -1344,6 +1345,16 @@ retry:
+ 		builder.WriteRune(']')
+ 	}
+ 
++	sslcert := httpx.OutputSSLCert(resp)
++	if scanopts.OutputSSLCert {
++		builder.WriteString(" [")
++		if !scanopts.OutputWithNoColor {
++			builder.WriteString(aurora.Cyan(sslcert).String())
++		} else {
++			builder.WriteString(sslcert)
++		}
++		builder.WriteRune(']')
++	}
+ 	serverHeader := resp.GetHeader("Server")
+ 	if scanopts.OutputServerHeader {
+ 		builder.WriteString(fmt.Sprintf(" [%s]", serverHeader))

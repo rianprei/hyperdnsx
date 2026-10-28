@@ -1,0 +1,26 @@
+diff --git a/common/httpx/httpx.go b/common/httpx/httpx.go
+index 590bc04..c8e6d63 100644
+--- a/common/httpx/httpx.go
++++ b/common/httpx/httpx.go
+@@ -57,7 +57,7 @@ func New(options *Options) (*HTTPX, error) {
+ 		httpx.NetworkPolicy = options.NetworkPolicy
+ 		fastdialerOpts.NetworkPolicy = options.NetworkPolicy
+ 	}
+-	fastdialerOpts.WithDialerHistory = true
++	fastdialerOpts.WithDialerHistory = options.WithDialerHistory
+ 	fastdialerOpts.WithZTLS = options.ZTLS
+ 	if len(options.Resolvers) > 0 {
+ 		fastdialerOpts.BaseResolvers = options.Resolvers
+diff --git a/common/httpx/option.go b/common/httpx/option.go
+index 3f5d2f7..092b10a 100644
+--- a/common/httpx/option.go
++++ b/common/httpx/option.go
+@@ -49,6 +49,8 @@ type Options struct {
+ 	NetworkPolicy             *networkpolicy.NetworkPolicy
+ 	CDNCheckClient            *cdncheck.Client
+ 	Protocol                  Proto
++
++	WithDialerHistory bool
+ }
+ 
+ // DefaultOptions contains the default options

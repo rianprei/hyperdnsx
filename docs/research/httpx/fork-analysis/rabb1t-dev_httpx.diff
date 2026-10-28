@@ -1,0 +1,488 @@
+diff --git a/README.md b/README.md
+index 98dce07..ac12bc8 100644
+--- a/README.md
++++ b/README.md
+@@ -202,7 +202,7 @@ OUTPUT:
+    -include-chain                         include redirect http chain in JSON output (-json only)
+    -store-chain                           include http redirect chain in responses (-sr only)
+    -svrc, -store-vision-recon-cluster     include visual recon clusters (-ss and -sr only)
+-   -pr, -protocol string                  protocol to use (unknown, http11)
++   -pr, -protocol string                  protocol to use (unknown, http11, http2)
+    -fepp, -filter-error-page-path string  path to store filtered error pages (default "filtered_error_page.json")
+    -lof, -list-output-fields              list available output field names for filtering
+    -eof, -exclude-output-fields string[]  exclude specified output fields from results
+@@ -232,6 +232,8 @@ CONFIGURATIONS:
+    -ztls                            use ztls library with autofallback to standard one for tls13
+    -no-decode                       avoid decoding body
+    -tlsi, -tls-impersonate          enable experimental client hello (ja3) tls randomization
++   -tls-impersonate-chrome          use Chrome JA3 fingerprint for TLS to avoid scanner/WAF detection
++   -browser-headers                 send browser-like Accept and Accept-Encoding headers to reduce WAF blocks
+    -no-stdin                        Disable Stdin processing
+    -hae, -http-api-endpoint string  experimental http api endpoint
+    -sf, -secret-file string         path to secret file for authentication
+@@ -314,6 +316,8 @@ For details about running httpx, see https://docs.projectdiscovery.io/tools/http
+    - `-http2`
+    - `-pipeline`
+    - `-tls-impersonate`
++   - `-tls-impersonate-chrome`
++   - `-browser-headers`
+ 
+ 
+ # Acknowledgement
+diff --git a/cmd/test-connect-proxy/main.go b/cmd/test-connect-proxy/main.go
+new file mode 100644
+index 0000000..563fc6d
+--- /dev/null
++++ b/cmd/test-connect-proxy/main.go
+@@ -0,0 +1,66 @@
++// test-connect-proxy is a minimal HTTP CONNECT proxy for testing httpx -proxy with -protocol http2.
++// Run: go run ./cmd/test-connect-proxy [listen]
++// Default listen: 127.0.0.1:31280
++// Then: echo "https://example.com" | httpx -proxy http://127.0.0.1:31280 -protocol http2 -silent -json
++package main
++
++import (
++	"bufio"
++	"io"
++	"log"
++	"net"
++	"net/http"
++	"os"
++	"strings"
++)
++
++func main() {
++	listen := "127.0.0.1:31280"
++	if len(os.Args) > 1 {
++		listen = os.Args[1]
++	}
++	listener, err := net.Listen("tcp", listen)
++	if err != nil {
++		log.Fatal(err)
++	}
++	log.Printf("CONNECT proxy listening on %s", listen)
++	for {
++		conn, err := listener.Accept()
++		if err != nil {
++			log.Print(err)
++			continue
++		}
++		go handle(conn)
++	}
++}
++
++func handle(conn net.Conn) {
++	defer conn.Close()
++	br := bufio.NewReader(conn)
++	req, err := http.ReadRequest(br)
++	if err != nil {
++		log.Printf("read request: %v", err)
++		return
++	}
++	if req.Method != http.MethodConnect {
++		log.Printf("not CONNECT: %s", req.Method)
++		return
++	}
++	target := req.URL.Host
++	if req.URL.Port() == "" {
++		target = net.JoinHostPort(req.URL.Host, "443")
++	}
++	backend, err := net.Dial("tcp", target)
++	if err != nil {
++		log.Printf("dial %s: %v", target, err)
++		resp := "HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n"
++		conn.Write([]byte(resp))
++		return
++	}
++	defer backend.Close()
++	if _, err := io.Copy(conn, strings.NewReader("HTTP/1.1 200 Connection Established\r\n\r\n")); err != nil {
++		return
++	}
++	go io.Copy(backend, br)
++	io.Copy(conn, backend)
++}
+diff --git a/common/httpx/encodings.go b/common/httpx/encodings.go
+index 4ce49a3..5d5b9dc 100644
+--- a/common/httpx/encodings.go
++++ b/common/httpx/encodings.go
+@@ -6,6 +6,7 @@ import (
+ 	"net/http"
+ 	"strings"
+ 
++	"github.com/andybalholm/brotli"
+ 	stringsutil "github.com/projectdiscovery/utils/strings"
+ 	"golang.org/x/text/encoding/korean"
+ 	"golang.org/x/text/encoding/simplifiedchinese"
+@@ -53,8 +54,20 @@ func DecodeKorean(s []byte) ([]byte, error) {
+ 	return koreanDecoder.Bytes(s)
+ }
+ 
+-// ExtractTitle from a response
++// DecodeData decompresses and decodes response body (e.g. Content-Encoding: br) and applies charset conversion.
+ func DecodeData(data []byte, headers http.Header) ([]byte, error) {
++	// Content-Encoding: br (brotli) — Go's net/http does not auto-decompress brotli for HTTP/2.
++	// Only decompress when the header explicitly says "br"; trying brotli on gzip data produces
++	// garbage and breaks title extraction when the server alternates between gzip and br.
++	enc := strings.ToLower(strings.TrimSpace(headers.Get("Content-Encoding")))
++	if strings.Contains(enc, "br") {
++		dec := brotli.NewReader(bytes.NewReader(data))
++		decompressed, err := io.ReadAll(dec)
++		if err == nil && len(decompressed) > 0 {
++			data = decompressed
++		}
++	}
++
+ 	// Non UTF-8
+ 	if contentTypes, ok := headers["Content-Type"]; ok {
+ 		contentType := strings.ToLower(strings.Join(contentTypes, ";"))
+diff --git a/common/httpx/httpx.go b/common/httpx/httpx.go
+index 039f4c4..0c370f9 100644
+--- a/common/httpx/httpx.go
++++ b/common/httpx/httpx.go
+@@ -140,6 +140,9 @@ func New(options *Options) (*HTTPX, error) {
+ 	transport := &http.Transport{
+ 		DialContext: httpx.Dialer.Dial,
+ 		DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
++			if options.TlsImpersonateChrome {
++				return httpx.Dialer.DialTLSWithConfigImpersonate(ctx, network, addr, &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS10}, impersonate.Chrome, nil)
++			}
+ 			if options.TlsImpersonate {
+ 				return httpx.Dialer.DialTLSWithConfigImpersonate(ctx, network, addr, &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS10}, impersonate.Random, nil)
+ 			}
+@@ -177,27 +180,50 @@ func New(options *Options) (*HTTPX, error) {
+ 		transport.Proxy = http.ProxyURL(proxyURL)
+ 	}
+ 
+-	httpx.client = retryablehttp.NewWithHTTPClient(&http.Client{
+-		Transport:     transport,
+-		Timeout:       httpx.Options.Timeout,
+-		CheckRedirect: redirectFunc,
+-	}, retryablehttpOptions)
+-
+-	transport2 := &http2.Transport{
+-		TLSClientConfig: &tls.Config{
+-			InsecureSkipVerify: true,
+-			MinVersion:         tls.VersionTLS10,
+-		},
+-		AllowHTTP: true,
++	// HTTP/2 transport with same JA3 impersonation as HTTP/1.1
++	tlsConfigH2 := &tls.Config{
++		InsecureSkipVerify: true,
++		MinVersion:         tls.VersionTLS10,
+ 	}
+ 	if httpx.Options.SniName != "" {
+-		transport2.TLSClientConfig.ServerName = httpx.Options.SniName
++		tlsConfigH2.ServerName = httpx.Options.SniName
++	}
++	useProxyForH2 := httpx.Options.Proxy != "" && httpx.Options.Protocol == "http2"
++	transport2 := &http2.Transport{
++		TLSClientConfig: tlsConfigH2,
++		AllowHTTP:       true,
++		DialTLSContext: func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
++			if cfg == nil {
++				cfg = tlsConfigH2
++			}
++			if useProxyForH2 {
++				return dialTLSViaProxy(ctx, network, addr, cfg, httpx.Options.Proxy, httpx.Dialer, httpx.Options)
++			}
++			if options.TlsImpersonateChrome {
++				return httpx.Dialer.DialTLSWithConfigImpersonate(ctx, network, addr, cfg, impersonate.Chrome, nil)
++			}
++			if options.TlsImpersonate {
++				return httpx.Dialer.DialTLSWithConfigImpersonate(ctx, network, addr, cfg, impersonate.Random, nil)
++			}
++			return httpx.Dialer.DialTLSWithConfig(ctx, network, addr, cfg)
++		},
+ 	}
+ 	httpx.client2 = &http.Client{
+ 		Transport: transport2,
+ 		Timeout:   httpx.Options.Timeout,
+ 	}
+ 
++	// Main client: use HTTP/2 transport when Protocol is http2, else HTTP/1.1
++	var mainTransport http.RoundTripper = transport
++	if httpx.Options.Protocol == "http2" {
++		mainTransport = transport2
++	}
++	httpx.client = retryablehttp.NewWithHTTPClient(&http.Client{
++		Transport:     mainTransport,
++		Timeout:       httpx.Options.Timeout,
++		CheckRedirect: redirectFunc,
++	}, retryablehttpOptions)
++
+ 	httpx.htmlPolicy = bluemonday.NewPolicy()
+ 	httpx.CustomHeaders = httpx.Options.CustomHeaders
+ 
+@@ -420,8 +446,10 @@ func (h *HTTPX) NewRequestWithContext(ctx context.Context, method, targetURL str
+ 	if !h.Options.Unsafe {
+ 		// set default user agent
+ 		req.Header.Set("User-Agent", h.Options.DefaultUserAgent)
+-		// set default encoding to accept utf8
+-		req.Header.Add("Accept-Charset", "utf-8")
++		// real browsers don't send Accept-Charset; skip when using browser-like headers
++		if !h.Options.BrowserHeaders {
++			req.Header.Add("Accept-Charset", "utf-8")
++		}
+ 	}
+ 	return
+ }
+@@ -442,7 +470,8 @@ func (h *HTTPX) SetCustomHeaders(r *retryablehttp.Request, headers map[string]st
+ 			r.Header.Set(name, value)
+ 		}
+ 	}
+-	if h.Options.RandomAgent {
++	// Only overwrite User-Agent with random if it wasn't explicitly set (e.g. by -H or -browser-headers)
++	if h.Options.RandomAgent && r.Header.Get("User-Agent") == h.Options.DefaultUserAgent {
+ 		userAgent := useragent.PickRandom()
+ 		r.Header.Set("User-Agent", userAgent.Raw) //nolint
+ 	}
+diff --git a/common/httpx/option.go b/common/httpx/option.go
+index fb10872..fb2ba5a 100644
+--- a/common/httpx/option.go
++++ b/common/httpx/option.go
+@@ -59,6 +59,8 @@ type Options struct {
+ 	customCookies             []*http.Cookie
+ 	SniName                   string
+ 	TlsImpersonate            bool
++	TlsImpersonateChrome      bool // use Chrome JA3 (overrides Random when both set)
++	BrowserHeaders            bool // send browser-like headers; skip Accept-Charset to match real browsers
+ 	NetworkPolicy             *networkpolicy.NetworkPolicy
+ 	CDNCheckClient            *cdncheck.Client
+ 	Protocol                  Proto
+diff --git a/common/httpx/proxy_http2.go b/common/httpx/proxy_http2.go
+new file mode 100644
+index 0000000..8d6b5f4
+--- /dev/null
++++ b/common/httpx/proxy_http2.go
+@@ -0,0 +1,155 @@
++package httpx
++
++import (
++	"bufio"
++	"context"
++	"crypto/tls"
++	"encoding/base64"
++	"fmt"
++	"io"
++	"net"
++	"net/url"
++	"strings"
++
++	"github.com/projectdiscovery/fastdialer/fastdialer"
++	utls "github.com/refraction-networking/utls"
++)
++
++// dialTLSViaProxy establishes a TLS connection to addr via an HTTP CONNECT proxy.
++// It dials the proxy, sends CONNECT addr, reads 200, then performs TLS handshake over the tunnel.
++// Supports TLS impersonation (Chrome/Random) when options request it.
++func dialTLSViaProxy(ctx context.Context, network, addr string, cfg *tls.Config, proxyURLStr string, dialer *fastdialer.Dialer, options *Options) (net.Conn, error) {
++	proxyURL, err := url.Parse(proxyURLStr)
++	if err != nil {
++		return nil, fmt.Errorf("proxy url: %w", err)
++	}
++	proxyHost := proxyURL.Host
++	if proxyURL.Port() == "" {
++		if proxyURL.Scheme == "https" {
++			proxyHost = net.JoinHostPort(proxyURL.Hostname(), "443")
++		} else {
++			proxyHost = net.JoinHostPort(proxyURL.Hostname(), "80")
++		}
++	}
++
++	conn, err := dialer.Dial(ctx, "tcp", proxyHost)
++	if err != nil {
++		return nil, fmt.Errorf("proxy dial: %w", err)
++	}
++
++	// CONNECT request per RFC 7230
++	connectReq := fmt.Sprintf("CONNECT %s HTTP/1.1\r\nHost: %s\r\n", addr, addr)
++	if proxyURL.User != nil {
++		pass, _ := proxyURL.User.Password()
++		auth := base64.StdEncoding.EncodeToString([]byte(proxyURL.User.Username() + ":" + pass))
++		connectReq += "Proxy-Authorization: Basic " + auth + "\r\n"
++	}
++	connectReq += "\r\n"
++
++	if _, err := conn.Write([]byte(connectReq)); err != nil {
++		conn.Close()
++		return nil, fmt.Errorf("proxy CONNECT write: %w", err)
++	}
++
++	br := bufio.NewReader(conn)
++	statusLine, err := br.ReadString('\n')
++	if err != nil {
++		conn.Close()
++		return nil, fmt.Errorf("proxy response: %w", err)
++	}
++	if !strings.HasPrefix(statusLine, "HTTP/") {
++		conn.Close()
++		return nil, fmt.Errorf("proxy invalid response: %s", strings.TrimSpace(statusLine))
++	}
++	code := ""
++	if parts := strings.SplitN(strings.TrimSpace(statusLine), " ", 2); len(parts) >= 2 {
++		parts = strings.SplitN(parts[1], " ", 2)
++		if len(parts) >= 1 {
++			code = parts[0]
++		}
++	}
++	if code != "200" {
++		// discard rest of response
++		for {
++			line, err := br.ReadString('\n')
++			if err != nil || line == "\r\n" {
++				break
++			}
++		}
++		conn.Close()
++		return nil, fmt.Errorf("proxy CONNECT failed: %s", strings.TrimSpace(statusLine))
++	}
++
++	// consume rest of headers
++	for {
++		line, err := br.ReadString('\n')
++		if err != nil {
++			conn.Close()
++			return nil, fmt.Errorf("proxy headers: %w", err)
++		}
++		if line == "\r\n" {
++			break
++		}
++	}
++
++	// any buffered data belongs to the proxy response body; we must not feed it to TLS.
++	// CONNECT 200 typically has no body, so we wrap conn to skip any buffered bytes once.
++	tunnelConn := &connAfterBuf{Conn: conn, br: br}
++
++	host, _, _ := net.SplitHostPort(addr)
++	if host == "" {
++		host = addr
++	}
++	if cfg == nil {
++		cfg = &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS10}
++	}
++	tlsCfg := cfg.Clone()
++	if tlsCfg.ServerName == "" {
++		tlsCfg.ServerName = host
++	}
++
++	if options.TlsImpersonateChrome || options.TlsImpersonate {
++		uCfg := &utls.Config{
++			InsecureSkipVerify: tlsCfg.InsecureSkipVerify,
++			ServerName:         tlsCfg.ServerName,
++			MinVersion:         tlsCfg.MinVersion,
++			MaxVersion:         tlsCfg.MaxVersion,
++			CipherSuites:       tlsCfg.CipherSuites,
++		}
++		clientHelloID := utls.HelloRandomized
++		if options.TlsImpersonateChrome {
++			clientHelloID = utls.HelloChrome_106_Shuffle
++		}
++		uconn := utls.UClient(tunnelConn, uCfg, clientHelloID)
++		if err := uconn.HandshakeContext(ctx); err != nil {
++			conn.Close()
++			return nil, fmt.Errorf("tls handshake via proxy: %w", err)
++		}
++		return uconn, nil
++	}
++
++	tlsConn := tls.Client(tunnelConn, tlsCfg)
++	if err := tlsConn.HandshakeContext(ctx); err != nil {
++		conn.Close()
++		return nil, fmt.Errorf("tls handshake via proxy: %w", err)
++	}
++	return tlsConn, nil
++}
++
++// connAfterBuf wraps a net.Conn and a bufio.Reader that may have buffered data.
++// Read first drains the buffer, then reads from Conn.
++type connAfterBuf struct {
++	net.Conn
++	br *bufio.Reader
++}
++
++func (c *connAfterBuf) Read(p []byte) (n int, err error) {
++	if c.br != nil {
++		n, err = c.br.Read(p)
++		if err != io.EOF {
++			return n, err
++		}
++		c.br = nil
++	}
++	return c.Conn.Read(p)
++}
+diff --git a/runner/options.go b/runner/options.go
+index ce74960..f2820cc 100644
+--- a/runner/options.go
++++ b/runner/options.go
+@@ -329,6 +329,8 @@ type Options struct {
+ 	Screenshot           bool
+ 	UseInstalledChrome   bool
+ 	TlsImpersonate       bool
++	TlsImpersonateChrome bool
++	BrowserHeaders       bool
+ 	DisableStdin         bool
+ 	HttpApiEndpoint      string
+ 	NoScreenshotBytes    bool
+@@ -526,6 +528,8 @@ func ParseOptions() *Options {
+ 		flagSet.BoolVar(&options.ZTLS, "ztls", false, "use ztls library with autofallback to standard one for tls13"),
+ 		flagSet.BoolVar(&options.NoDecode, "no-decode", false, "avoid decoding body"),
+ 		flagSet.BoolVarP(&options.TlsImpersonate, "tls-impersonate", "tlsi", false, "enable experimental client hello (ja3) tls randomization"),
++		flagSet.BoolVar(&options.TlsImpersonateChrome, "tls-impersonate-chrome", false, "use Chrome JA3 fingerprint for TLS to avoid scanner/WAF detection"),
++		flagSet.BoolVar(&options.BrowserHeaders, "browser-headers", false, "send browser-like Accept and Accept-Encoding headers to reduce WAF blocks"),
+ 		flagSet.BoolVar(&options.DisableStdin, "no-stdin", false, "Disable Stdin processing"),
+ 		flagSet.StringVarP(&options.HttpApiEndpoint, "http-api-endpoint", "hae", "", "experimental http api endpoint"),
+ 		flagSet.StringVarP(&options.SecretFile, "secret-file", "sf", "", "path to the secret file for authentication"),
+@@ -796,7 +800,7 @@ func (options *Options) ValidateOptions() error {
+ 		options.OutputCDN = "true"
+ 	}
+ 
+-	if !stringsutil.EqualFoldAny(options.Protocol, string(httpxcommon.UNKNOWN), string(httpxcommon.HTTP11)) {
++	if !stringsutil.EqualFoldAny(options.Protocol, string(httpxcommon.UNKNOWN), string(httpxcommon.HTTP11), string(httpxcommon.HTTP2)) {
+ 		return fmt.Errorf("invalid protocol: %s", options.Protocol)
+ 	}
+ 
+diff --git a/runner/runner.go b/runner/runner.go
+index 8647c23..156d36f 100644
+--- a/runner/runner.go
++++ b/runner/runner.go
+@@ -234,6 +234,8 @@ func New(options *Options) (*Runner, error) {
+ 	}
+ 	httpxOptions.Resolvers = options.Resolvers
+ 	httpxOptions.TlsImpersonate = options.TlsImpersonate
++	httpxOptions.TlsImpersonateChrome = options.TlsImpersonateChrome
++	httpxOptions.BrowserHeaders = options.BrowserHeaders
+ 	httpxOptions.Protocol = httpx.Proto(options.Protocol)
+ 
+ 	var key, value string
+@@ -254,6 +256,31 @@ func New(options *Options) (*Runner, error) {
+ 		value = strings.TrimSpace(tokens[1])
+ 		httpxOptions.CustomHeaders[key] = value
+ 	}
++	if options.BrowserHeaders {
++		// Set browser-like headers only if not already set by -H (match real Chrome)
++		for _, hdr := range []struct{ key, value string }{
++			{"Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"},
++			{"Accept-Encoding", "gzip, deflate, br"},
++			{"Accept-Language", "en-US,en;q=0.5"},
++			{"User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"},
++			{"Sec-Fetch-Dest", "document"},
++			{"Sec-Fetch-Mode", "navigate"},
++			{"Sec-Fetch-Site", "none"},
++			{"Sec-Fetch-User", "?1"},
++			{"Upgrade-Insecure-Requests", "1"},
++		} {
++			has := false
++			for k := range httpxOptions.CustomHeaders {
++				if strings.EqualFold(k, hdr.key) {
++					has = true
++					break
++				}
++			}
++			if !has {
++				httpxOptions.CustomHeaders[hdr.key] = hdr.value
++			}
++		}
++	}
+ 	httpxOptions.SniName = options.SniName
+ 
+ 	runner.hp, err = httpx.New(&httpxOptions)

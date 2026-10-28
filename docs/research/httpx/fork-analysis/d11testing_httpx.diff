@@ -1,0 +1,75 @@
+diff --git a/runner/runner.go b/runner/runner.go
+index 4b80615..17bc4ff 100644
+--- a/runner/runner.go
++++ b/runner/runner.go
+@@ -551,6 +551,31 @@ func (r *Runner) testAndSet(k string) bool {
+ 	return true
+ }
+ 
++// isSafeRecursiveTarget validates that a value extracted from a server-controlled
++// source (TLS cert fields, CSP headers) is safe to use as a recursive probe target.
++func isSafeRecursiveTarget(value string) bool {
++	value = strings.TrimSpace(value)
++	if value == "" {
++		return false
++	}
++	// Valid DNS hostnames never contain commas. Reject to prevent the comma-split
++	// branch in r.targets from synthesizing attacker-chosen Host/CustomHost pairs.
++	if strings.Contains(value, ",") {
++		return false
++	}
++	// Reject whitespace, which could cause unexpected parsing.
++	if strings.ContainsAny(value, " \t\n\r") {
++		return false
++	}
++	// Reject raw IP addresses — recursive probing from cert/CSP data should only
++	// discover new domain names, not allow the server to steer connections to
++	// arbitrary IPs (especially internal/link-local/cloud-metadata addresses).
++	if net.ParseIP(value) != nil {
++		return false
++	}
++	return true
++}
++
+ func (r *Runner) streamInput() (chan string, error) {
+ 	out := make(chan string)
+ 	go func() {
+@@ -1387,12 +1412,12 @@ func (r *Runner) process(t string, wg *syncutil.AdaptiveWaitGroup, hp *httpx.HTT
+ 						output <- result
+ 						if scanopts.TLSProbe && result.TLSData != nil {
+ 							for _, tt := range result.TLSData.SubjectAN {
+-								if !r.testAndSet(tt) {
++								if !isSafeRecursiveTarget(tt) || !r.testAndSet(tt) {
+ 									continue
+ 								}
+ 								r.process(tt, wg, hp, protocol, scanopts, output)
+ 							}
+-							if r.testAndSet(result.TLSData.SubjectCN) {
++							if isSafeRecursiveTarget(result.TLSData.SubjectCN) && r.testAndSet(result.TLSData.SubjectCN) {
+ 								r.process(result.TLSData.SubjectCN, wg, hp, protocol, scanopts, output)
+ 							}
+ 						}
+@@ -1401,7 +1426,7 @@ func (r *Runner) process(t string, wg *syncutil.AdaptiveWaitGroup, hp *httpx.HTT
+ 							domains := result.CSPData.Domains
+ 							domains = append(domains, result.CSPData.Fqdns...)
+ 							for _, tt := range domains {
+-								if !r.testAndSet(tt) {
++								if !isSafeRecursiveTarget(tt) || !r.testAndSet(tt) {
+ 									continue
+ 								}
+ 								r.process(tt, wg, hp, protocol, scanopts, output)
+@@ -1441,12 +1466,12 @@ func (r *Runner) process(t string, wg *syncutil.AdaptiveWaitGroup, hp *httpx.HTT
+ 						output <- result
+ 						if scanopts.TLSProbe && result.TLSData != nil {
+ 							for _, tt := range result.TLSData.SubjectAN {
+-								if !r.testAndSet(tt) {
++								if !isSafeRecursiveTarget(tt) || !r.testAndSet(tt) {
+ 									continue
+ 								}
+ 								r.process(tt, wg, hp, protocol, scanopts, output)
+ 							}
+-							if r.testAndSet(result.TLSData.SubjectCN) {
++							if isSafeRecursiveTarget(result.TLSData.SubjectCN) && r.testAndSet(result.TLSData.SubjectCN) {
+ 								r.process(result.TLSData.SubjectCN, wg, hp, protocol, scanopts, output)
+ 							}
+ 						}

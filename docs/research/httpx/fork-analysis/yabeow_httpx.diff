@@ -1,0 +1,205 @@
+diff --git a/README.md b/README.md
+index db46be5..8cc567a 100644
+--- a/README.md
++++ b/README.md
+@@ -237,7 +237,7 @@ DEBUG:
+ 
+ OPTIMIZATIONS:
+    -nf, -no-fallback                  display both probed protocol (HTTPS and HTTP)
+-   -nfs, -no-fallback-scheme          probe with protocol scheme specified in input 
++   -nfs, -no-fallback-scheme          probe with protocol scheme specified in input
+    -maxhr, -max-host-error int        max error count per host before skipping remaining path/s (default 30)
+    -e, -exclude string[]              exclude host matching specified filter ('cdn', 'private-ips', cidr, ip, regex)
+    -retries int                       number of retries
+diff --git a/runner/options.go b/runner/options.go
+index 69c67a6..6427b28 100644
+--- a/runner/options.go
++++ b/runner/options.go
+@@ -77,6 +77,7 @@ type ScanOptions struct {
+ 	OutputCName               bool
+ 	OutputCDN                 string
+ 	OutputResponseTime        bool
++	OutputExtractJSFiles      string
+ 	PreferHTTPS               bool
+ 	NoFallback                bool
+ 	NoFallbackScheme          bool
+@@ -167,6 +168,7 @@ type Options struct {
+ 	filterContentLength       []int
+ 	Output                    string
+ 	OutputAll                 bool
++	OutputExtractJSFiles      string
+ 	StoreResponseDir          string
+ 	OmitBody                  bool
+ 	HTTPProxy                 string
+@@ -435,6 +437,7 @@ func ParseOptions() *Options {
+ 	flagSet.CreateGroup("output", "Output",
+ 		flagSet.StringVarP(&options.Output, "output", "o", "", "file to write output results"),
+ 		flagSet.BoolVarP(&options.OutputAll, "output-all", "oa", false, "filename to write output results in all formats"),
++		flagSet.StringVarP(&options.OutputExtractJSFiles, "output-js", "ojs", "", "file to write extracted javascript files"),
+ 		flagSet.BoolVarP(&options.StoreResponse, "store-response", "sr", false, "store http response to output directory"),
+ 		flagSet.StringVarP(&options.StoreResponseDir, "store-response-dir", "srd", "", "store http response to custom directory"),
+ 		flagSet.BoolVarP(&options.OmitBody, "omit-body", "ob", false, "omit response body in output"),
+@@ -808,3 +811,5 @@ func flagsIncompatibleWithSilent(options *Options) []string {
+ 	}
+ 	return incompatibleFlagsList
+ }
++
++var regexJSFiles = regexp.MustCompile(`(?m)src="([\/\.\-\_\~a-zA-Z0-9]+.js)"`)
+diff --git a/runner/runner.go b/runner/runner.go
+index 06ea14f..821a080 100644
+--- a/runner/runner.go
++++ b/runner/runner.go
+@@ -13,6 +13,7 @@ import (
+ 	"net"
+ 	"net/http"
+ 	"net/http/httputil"
++	"net/url"
+ 	"os"
+ 	"path"
+ 	"path/filepath"
+@@ -289,6 +290,7 @@ func New(options *Options) (*Runner, error) {
+ 	scanopts.NoHeadlessBody = options.NoHeadlessBody
+ 	scanopts.UseInstalledChrome = options.UseInstalledChrome
+ 	scanopts.ScreenshotTimeout = options.ScreenshotTimeout
++	scanopts.OutputExtractJSFiles = options.OutputExtractJSFiles
+ 
+ 	if options.OutputExtractRegexs != nil {
+ 		for _, regex := range options.OutputExtractRegexs {
+@@ -734,7 +736,7 @@ func (r *Runner) RunEnumeration() {
+ 			}
+ 		}()
+ 
+-		var plainFile, jsonFile, csvFile, indexFile, indexScreenshotFile *os.File
++		var plainFile, jsonFile, csvFile, indexFile, indexScreenshotFile, jsFile *os.File
+ 
+ 		if r.options.Output != "" && r.options.OutputAll {
+ 			plainFile = openOrCreateFile(r.options.Resume, r.options.Output)
+@@ -752,6 +754,11 @@ func (r *Runner) RunEnumeration() {
+ 			defer plainFile.Close()
+ 		}
+ 
++		if r.options.OutputExtractJSFiles != "" {
++			jsFile = openOrCreateFile(r.options.Resume, r.options.OutputExtractJSFiles)
++			defer jsFile.Close()
++		}
++
+ 		if r.options.Output != "" && r.options.JSONOutput && jsonFile == nil {
+ 			ext := ""
+ 			if jsonAndCsv {
+@@ -1131,6 +1138,13 @@ func (r *Runner) RunEnumeration() {
+ 				}
+ 			}
+ 
++			if jsFile != nil && len(resp.JSFiles) > 0 {
++				data, err := json.Marshal(resp.JSFiles)
++				if err == nil {
++					jsFile.WriteString(resp.URL + " " + string(data) + "\n")
++				}
++			}
++
+ 			for _, nextStep := range nextSteps {
+ 				nextStep <- resp
+ 			}
+@@ -2174,6 +2188,82 @@ retry:
+ 		}
+ 	}
+ 
++	jsFiles := []string{}
++	seenJSFiles := make(map[string]struct{})
++	if scanopts.OutputExtractJSFiles != "" {
++		for _, chain := range resp.Chain {
++			for _, matchs := range regexJSFiles.FindAllSubmatch(chain.Response, -1) {
++				url, err := url.Parse(chain.RequestURL)
++				if err == nil {
++					jsFile := string(matchs[1])
++					if strings.HasPrefix(jsFile, "//") {
++						if url.Scheme == "https" {
++							jsFiles = append(jsFiles, "https:"+jsFile)
++						} else {
++							jsFiles = append(jsFiles, "http:"+jsFile)
++						}
++					} else if strings.HasPrefix(jsFile, "/") {
++						if url.Scheme == "https" {
++							jsFiles = append(jsFiles, fmt.Sprintf("https://%s%s", url.Host, jsFile))
++						} else {
++							jsFiles = append(jsFiles, fmt.Sprintf("http://%s%s", url.Host, jsFile))
++						}
++					} else {
++						parentPath := ""
++						if strings.Count(url.Path, "/") == 0 {
++							parentPath = url.Path
++						} else {
++							parentPath = url.Path[0:strings.LastIndex(url.Path, "/")]
++						}
++						url.Path = filepath.Join(parentPath, jsFile)
++
++						if _, ok := seenJSFiles[url.String()]; !ok {
++							jsFiles = append(jsFiles, url.String())
++							seenJSFiles[url.String()] = struct{}{}
++						}
++					}
++				}
++			}
++		}
++
++		for _, matchs := range regexJSFiles.FindAllSubmatch(resp.Data, -1) {
++			rawURL := resp.GetChainLastURL()
++			if rawURL == "" {
++				rawURL = req.URL.String()
++			}
++			url, err := url.Parse(rawURL)
++			if err == nil {
++				jsFile := string(matchs[1])
++				if strings.HasPrefix(jsFile, "//") {
++					if url.Scheme == "https" {
++						jsFiles = append(jsFiles, "https:"+jsFile)
++					} else {
++						jsFiles = append(jsFiles, "http:"+jsFile)
++					}
++				} else if strings.HasPrefix(jsFile, "/") {
++					if url.Scheme == "https" {
++						jsFiles = append(jsFiles, fmt.Sprintf("https://%s%s", url.Host, jsFile))
++					} else {
++						jsFiles = append(jsFiles, fmt.Sprintf("http://%s%s", url.Host, jsFile))
++					}
++				} else {
++					parentPath := ""
++					if strings.Count(url.Path, "/") == 0 {
++						parentPath = url.Path
++					} else {
++						parentPath = url.Path[0:strings.LastIndex(url.Path, "/")]
++					}
++					url.Path = filepath.Join(parentPath, jsFile)
++
++					if _, ok := seenJSFiles[url.String()]; !ok {
++						jsFiles = append(jsFiles, url.String())
++						seenJSFiles[url.String()] = struct{}{}
++					}
++				}
++			}
++		}
++	}
++
+ 	result := Result{
+ 		Timestamp:        time.Now(),
+ 		Request:          request,
+@@ -2230,6 +2320,7 @@ retry:
+ 			"PageType": r.errorPageClassifier.Classify(respData),
+ 			"pHash":    pHash,
+ 		},
++		JSFiles:           jsFiles,
+ 		TechnologyDetails: technologyDetails,
+ 		Resolvers:         resolvers,
+ 		RequestRaw:        requestDump,
+diff --git a/runner/types.go b/runner/types.go
+index da3b1cc..bbf2e86 100644
+--- a/runner/types.go
++++ b/runner/types.go
+@@ -92,6 +92,7 @@ type Result struct {
+ 	ScreenshotPathRel  string                 `json:"screenshot_path_rel,omitempty" csv:"screenshot_path_rel"`
+ 	KnowledgeBase      map[string]interface{} `json:"knowledgebase,omitempty" csv:"knowledgebase"`
+ 	Resolvers          []string               `json:"resolvers,omitempty" csv:"resolvers"`
++	JSFiles            []string               `json:"js_files,omitempty" csv:"js_files"`
+ 	Fqdns              []string               `json:"body_fqdn,omitempty"`
+ 	Domains            []string               `json:"body_domains,omitempty"`
+ 
