@@ -42,6 +42,11 @@ type Result struct {
 	// --- TLS (populated when -tls-grab and the endpoint is HTTPS) ---
 	TLS *TLSInfo `json:"tls,omitempty"`
 
+	// --- body extraction (populated when an extractor is configured) ---
+	JSFiles []string            `json:"js_files,omitempty"`
+	Emails  []string            `json:"emails,omitempty"`
+	Extract map[string][]string `json:"extract,omitempty"`
+
 	// --- status ---
 	Failed bool   `json:"failed,omitempty"`
 	Error  string `json:"error,omitempty"`

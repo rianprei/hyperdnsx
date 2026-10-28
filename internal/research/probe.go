@@ -26,14 +26,17 @@ type ProbeConfig struct {
 	// recovering the browser-impersonation capability surveyed from the
 	// rabb1t-dev fork. Empty means the default Go ClientHello.
 	TLSImpersonate string
+	// Extractor, when non-nil, runs body-extraction passes on each response.
+	Extractor *Extractor
 }
 
 // Prober wraps the httpx probing engine. It is safe for concurrent use: the
 // underlying *httpx.HTTPX performs per-request work and holds no mutable
 // per-call state.
 type Prober struct {
-	engine  *httpx.HTTPX
-	tlsGrab bool
+	engine    *httpx.HTTPX
+	tlsGrab   bool
+	extractor *Extractor
 }
 
 // NewProber builds a Prober from cfg, layering overrides onto httpx defaults.
@@ -64,7 +67,7 @@ func NewProber(cfg ProbeConfig) (*Prober, error) {
 	if err != nil {
 		return nil, fmt.Errorf("init httpx engine: %w", err)
 	}
-	return &Prober{engine: engine, tlsGrab: cfg.TLSGrab}, nil
+	return &Prober{engine: engine, tlsGrab: cfg.TLSGrab, extractor: cfg.Extractor}, nil
 }
 
 // Probe performs a single HTTP request against targetURL and returns a copy of
@@ -100,6 +103,12 @@ func (p *Prober) Probe(base Result, targetURL, scheme, port string) Result {
 
 	if p.tlsGrab && resp.TLSData != nil {
 		out.TLS = mapTLS(resp.TLSData)
+	}
+	if p.extractor != nil && len(resp.Data) > 0 {
+		ex := p.extractor.Extract(targetURL, resp.Data)
+		out.JSFiles = ex.JSFiles
+		out.Emails = ex.Emails
+		out.Extract = ex.Custom
 	}
 	return out
 }

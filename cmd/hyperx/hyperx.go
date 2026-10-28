@@ -44,6 +44,9 @@ type options struct {
 	tlsImpersonate  string
 	randomAgent     bool
 	noResolve       bool
+	extractJS       bool
+	extractEmails   bool
+	extractRegex    string
 	jsonOut         bool
 	silent          bool
 }
@@ -65,6 +68,16 @@ func main() {
 		gologger.Fatal().Msgf("no targets provided (use -l or pipe via stdin)")
 	}
 
+	regexes, err := research.CompileRegexes(splitComma(opts.extractRegex))
+	if err != nil {
+		gologger.Fatal().Msgf("invalid -extract-regex: %s", err)
+	}
+	extractor := research.NewExtractor(research.ExtractConfig{
+		JS:      opts.extractJS,
+		Emails:  opts.extractEmails,
+		Regexes: regexes,
+	})
+
 	prober, err := research.NewProber(research.ProbeConfig{
 		Timeout:         time.Duration(opts.timeout) * time.Second,
 		RetryMax:        opts.retries,
@@ -73,6 +86,7 @@ func main() {
 		TLSImpersonate:  opts.tlsImpersonate,
 		RandomAgent:     opts.randomAgent,
 		Threads:         opts.threads,
+		Extractor:       extractor,
 	})
 	if err != nil {
 		gologger.Fatal().Msgf("could not init probe engine: %s", err)
@@ -130,6 +144,11 @@ func parseOptions() *options {
 		fs.StringVar(&o.tlsImpersonate, "tls-impersonate", "", "ClientHello profile to impersonate (e.g. chrome)"),
 		fs.BoolVar(&o.randomAgent, "random-agent", false, "use a random User-Agent per request"),
 		fs.BoolVar(&o.noResolve, "no-resolve", false, "skip the DNS stage and probe targets directly"),
+	)
+	fs.CreateGroup("extract", "Extract",
+		fs.BoolVar(&o.extractJS, "extract-js", false, "extract referenced .js files from responses"),
+		fs.BoolVar(&o.extractEmails, "extract-emails", false, "extract email addresses from responses"),
+		fs.StringVar(&o.extractRegex, "extract-regex", "", "custom extraction regexes (comma-separated name=pattern)"),
 	)
 	fs.CreateGroup("resolver", "Resolver",
 		fs.StringVarP(&o.resolvers, "resolvers", "r", "", "DNS resolvers (file or comma-separated; default public resolvers)"),
