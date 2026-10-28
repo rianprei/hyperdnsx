@@ -46,6 +46,7 @@ type options struct {
 	noResolve       bool
 	cdnCheck        bool
 	wafDetect       bool
+	techDetect      bool
 	hostHeader      string
 	extractJS       bool
 	extractEmails   bool
@@ -92,6 +93,7 @@ func main() {
 		Extractor:       extractor,
 		HostHeader:      opts.hostHeader,
 		WAFDetect:       opts.wafDetect,
+		TechDetect:      opts.techDetect,
 	})
 	if err != nil {
 		gologger.Fatal().Msgf("could not init probe engine: %s", err)
@@ -152,6 +154,7 @@ func parseOptions() *options {
 		fs.BoolVar(&o.noResolve, "no-resolve", false, "skip the DNS stage and probe targets directly"),
 		fs.BoolVar(&o.cdnCheck, "cdn", false, "classify resolved hosts as CDN/WAF/cloud (reuses httpx cdncheck)"),
 		fs.BoolVar(&o.wafDetect, "waf", false, "fingerprint WAF/security products from response evidence"),
+		fs.BoolVarP(&o.techDetect, "tech-detect", "td", false, "fingerprint technologies/stack via Wappalyzer (static)"),
 		fs.StringVar(&o.hostHeader, "host-header", "", "override the Host header on every probe (vhost)"),
 	)
 	fs.CreateGroup("extract", "Extract",

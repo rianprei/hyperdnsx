@@ -107,6 +107,46 @@ func TestPipelineProbesLocalServer(t *testing.T) {
 	}
 }
 
+// TestPipelineTechDetect verifies Wappalyzer fingerprinting runs end-to-end and
+// identifies a technology from response evidence (hermetic, embedded DB).
+func TestPipelineTechDetect(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Server", "nginx/1.25.0")
+		w.Header().Set("X-Powered-By", "PHP/8.2.0")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("<html><body>ok</body></html>"))
+	}))
+	defer srv.Close()
+
+	prober, err := NewProber(ProbeConfig{TechDetect: true})
+	if err != nil {
+		t.Fatalf("NewProber: %v", err)
+	}
+
+	var results []Result
+	NewPipeline(nil, prober, PipelineConfig{Resolve: false}).
+		Run([]string{srv.URL}, func(r Result) { results = append(results, r) })
+
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if len(results[0].Tech) == 0 {
+		t.Fatal("expected at least one technology detected")
+	}
+	if !containsSubstr(results[0].Tech, "Nginx") && !containsSubstr(results[0].Tech, "PHP") {
+		t.Errorf("expected Nginx/PHP in tech, got %v", results[0].Tech)
+	}
+}
+
+func containsSubstr(list []string, sub string) bool {
+	for _, s := range list {
+		if strings.Contains(s, sub) {
+			return true
+		}
+	}
+	return false
+}
+
 // TestProbeHostHeaderOverride verifies -host-header overrides the Host sent to
 // the server (vhost probing) and is recorded in the result.
 func TestProbeHostHeaderOverride(t *testing.T) {

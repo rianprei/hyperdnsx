@@ -3,11 +3,13 @@ package research
 import (
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/projectdiscovery/httpx/common/httpx"
 	"github.com/projectdiscovery/tlsx/pkg/tlsx/clients"
+	wappalyzer "github.com/projectdiscovery/wappalyzergo"
 )
 
 // ProbeConfig controls the HTTP probe stage. Zero values fall back to httpx
@@ -33,6 +35,10 @@ type ProbeConfig struct {
 	HostHeader string
 	// WAFDetect runs response-evidence WAF fingerprinting on each response.
 	WAFDetect bool
+	// TechDetect runs Wappalyzer technology fingerprinting (static, no browser)
+	// on each response, recovering the tech-detect capability from the fork
+	// ecosystem by reusing the wappalyzergo library httpx itself uses.
+	TechDetect bool
 }
 
 // Prober wraps the httpx probing engine. It is safe for concurrent use: the
@@ -44,6 +50,7 @@ type Prober struct {
 	extractor  *Extractor
 	hostHeader string
 	wafDetect  bool
+	wappalyze  *wappalyzer.Wappalyze
 }
 
 // NewProber builds a Prober from cfg, layering overrides onto httpx defaults.
@@ -74,13 +81,22 @@ func NewProber(cfg ProbeConfig) (*Prober, error) {
 	if err != nil {
 		return nil, fmt.Errorf("init httpx engine: %w", err)
 	}
-	return &Prober{
+
+	prober := &Prober{
 		engine:     engine,
 		tlsGrab:    cfg.TLSGrab,
 		extractor:  cfg.Extractor,
 		hostHeader: cfg.HostHeader,
 		wafDetect:  cfg.WAFDetect,
-	}, nil
+	}
+	if cfg.TechDetect {
+		wappalyze, err := wappalyzer.New()
+		if err != nil {
+			return nil, fmt.Errorf("init wappalyzer: %w", err)
+		}
+		prober.wappalyze = wappalyze
+	}
+	return prober, nil
 }
 
 // Probe performs a single HTTP request against targetURL and returns a copy of
@@ -123,6 +139,9 @@ func (p *Prober) Probe(base Result, targetURL, scheme, port string) Result {
 	}
 	if p.wafDetect {
 		out.WAF = DetectWAF(resp.Headers, resp.Data)
+	}
+	if p.wappalyze != nil {
+		out.Tech = sortedKeys(p.wappalyze.Fingerprint(resp.Headers, resp.Data))
 	}
 	if p.extractor != nil && len(resp.Data) > 0 {
 		ex := p.extractor.Extract(targetURL, resp.Data)
@@ -168,6 +187,19 @@ func mapTLS(d *clients.Response) *TLSInfo {
 		}
 	}
 	return info
+}
+
+// sortedKeys returns the map keys as a sorted slice (stable tech output).
+func sortedKeys(m map[string]struct{}) []string {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // firstToken returns the substring before the first occurrence of sep, trimmed.

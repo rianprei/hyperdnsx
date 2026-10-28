@@ -28,21 +28,22 @@ type Result struct {
 	CDNType     string   `json:"cdn_type,omitempty"`
 
 	// --- HTTP stage ---
-	URL           string `json:"url,omitempty"`
-	Scheme        string `json:"scheme,omitempty"`
-	Port          string `json:"port,omitempty"`
-	StatusCode    int    `json:"status_code,omitempty"`
-	Title         string `json:"title,omitempty"`
-	WebServer     string `json:"webserver,omitempty"`
-	ContentType   string `json:"content_type,omitempty"`
-	ContentLength int    `json:"content_length,omitempty"`
-	Words         int    `json:"words,omitempty"`
-	Lines         int    `json:"lines,omitempty"`
-	Location      string `json:"location,omitempty"`
-	HTTP2         bool   `json:"http2,omitempty"`
-	ResponseTime  string `json:"response_time,omitempty"`
-	HostHeader    string `json:"host_header,omitempty"`
-	WAF           string `json:"waf,omitempty"`
+	URL           string   `json:"url,omitempty"`
+	Scheme        string   `json:"scheme,omitempty"`
+	Port          string   `json:"port,omitempty"`
+	StatusCode    int      `json:"status_code,omitempty"`
+	Title         string   `json:"title,omitempty"`
+	WebServer     string   `json:"webserver,omitempty"`
+	ContentType   string   `json:"content_type,omitempty"`
+	ContentLength int      `json:"content_length,omitempty"`
+	Words         int      `json:"words,omitempty"`
+	Lines         int      `json:"lines,omitempty"`
+	Location      string   `json:"location,omitempty"`
+	HTTP2         bool     `json:"http2,omitempty"`
+	ResponseTime  string   `json:"response_time,omitempty"`
+	HostHeader    string   `json:"host_header,omitempty"`
+	WAF           string   `json:"waf,omitempty"`
+	Tech          []string `json:"tech,omitempty"`
 
 	// --- TLS (populated when -tls-grab and the endpoint is HTTPS) ---
 	TLS *TLSInfo `json:"tls,omitempty"`

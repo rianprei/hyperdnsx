@@ -46,6 +46,7 @@ hyperx -l targets.txt -follow-redirects -tls-impersonate chrome -o out.jsonl -js
 | `-no-resolve` | off | skip the DNS stage, probe targets directly |
 | `-cdn` | off | classify resolved hosts as CDN/WAF/cloud (reuses httpx cdncheck) |
 | `-waf` | off | fingerprint WAF/security products from response evidence |
+| `-td, -tech-detect` | off | fingerprint technologies/stack via Wappalyzer (static) |
 | `-host-header` | — | override the Host header on every probe (vhost) |
 | `-extract-js` | off | extract referenced `.js` files (absolute URLs) |
 | `-extract-emails` | off | extract email addresses from responses |
@@ -122,7 +123,8 @@ pipeline. Each row maps a surveyed fork feature to its integration point here.
 | JA3 / JARM fingerprint fields | rabb1t-dev | **Done** (surfaced when engine computes) | `TLSInfo` |
 | Chrome ClientHello impersonation | rabb1t-dev | **Done** (`-tls-impersonate`) | `ProbeConfig.TLSImpersonate` |
 | Random User-Agent | upstream | **Done** (`-random-agent`) | `ProbeConfig.RandomAgent` |
-| Headless JS-runtime tech detect (React/Vite/TanStack) | CarlosCommits, dkarv | Planned | new `probe` option + chromedp sink |
+| Technology/stack detection (static Wappalyzer) | CarlosCommits, dkarv, xiaoyaochen | **Done** (`-tech-detect`/`-td`, reuses wappalyzergo) | `probe.go` |
+| Headless JS-runtime tech detect (React/Vite/TanStack) | CarlosCommits, dkarv | Planned (needs chromedp) | browser sink |
 | Response dedup (simhash + LSH) | kno-com | Planned | post-emit `internal/research/dedup` |
 | Pluggable auth providers | kno-com | Planned | `ProbeConfig.Auth` |
 | CDN/WAF-range classification | l0ners, atoz-project | **Done** (`-cdn`, reuses httpx cdncheck) | `probe.go` `CheckCDN` |
