@@ -41,6 +41,8 @@ type Result struct {
 	Location      string `json:"location,omitempty"`
 	HTTP2         bool   `json:"http2,omitempty"`
 	ResponseTime  string `json:"response_time,omitempty"`
+	HostHeader    string `json:"host_header,omitempty"`
+	WAF           string `json:"waf,omitempty"`
 
 	// --- TLS (populated when -tls-grab and the endpoint is HTTPS) ---
 	TLS *TLSInfo `json:"tls,omitempty"`

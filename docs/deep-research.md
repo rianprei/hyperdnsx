@@ -44,6 +44,12 @@ hyperx -l targets.txt -follow-redirects -tls-impersonate chrome -o out.jsonl -js
 | `-tls-impersonate` | — | ClientHello profile to impersonate (e.g. `chrome`) |
 | `-random-agent` | off | random User-Agent per request |
 | `-no-resolve` | off | skip the DNS stage, probe targets directly |
+| `-cdn` | off | classify resolved hosts as CDN/WAF/cloud (reuses httpx cdncheck) |
+| `-waf` | off | fingerprint WAF/security products from response evidence |
+| `-host-header` | — | override the Host header on every probe (vhost) |
+| `-extract-js` | off | extract referenced `.js` files (absolute URLs) |
+| `-extract-emails` | off | extract email addresses from responses |
+| `-extract-regex` | — | custom extraction regexes (comma-separated `name=pattern`) |
 | `-r, -resolvers` | public set | DNS resolvers (file or comma-separated) |
 | `-t, -threads` | 25 | concurrent workers |
 | `-timeout` | 10 | per-request timeout (seconds) |
@@ -120,10 +126,10 @@ pipeline. Each row maps a surveyed fork feature to its integration point here.
 | Response dedup (simhash + LSH) | kno-com | Planned | post-emit `internal/research/dedup` |
 | Pluggable auth providers | kno-com | Planned | `ProbeConfig.Auth` |
 | CDN/WAF-range classification | l0ners, atoz-project | **Done** (`-cdn`, reuses httpx cdncheck) | `probe.go` `CheckCDN` |
-| Active WAF fingerprinting | l0ners | Planned | `probe.go` enrich stage |
+| Active WAF fingerprinting | l0ners | **Done** (`-waf`, response-evidence signatures) | `waf.go` |
 | Recog fingerprint-DB matching | tracertea | Planned | tech-detect sink |
 | Custom Wappalyzer fingerprint file | xiaoyaochen | Planned | tech-detect option |
-| vhost / custom-Host probing | jsifuentes | Planned | target fan-out |
+| vhost / custom-Host probing | jsifuentes | **Done** (`-host-header`) | `probe.go` |
 | CPE (→CVE) derivation | securifera, CarlosCommits | Planned | enrich stage |
 | JS-file / email / custom-regex extraction | yabeow, nyxgeek, b3r1ch | **Done** (`-extract-js`, `-extract-emails`, `-extract-regex`) | `extract.go` |
 | HTML / CSV report output | P1kAju | Planned | output sinks |

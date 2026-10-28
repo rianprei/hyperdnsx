@@ -107,6 +107,38 @@ func TestPipelineProbesLocalServer(t *testing.T) {
 	}
 }
 
+// TestProbeHostHeaderOverride verifies -host-header overrides the Host sent to
+// the server (vhost probing) and is recorded in the result.
+func TestProbeHostHeaderOverride(t *testing.T) {
+	// Arrange: server echoes the received Host into a response header.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Echo-Host", r.Host)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	prober, err := NewProber(ProbeConfig{HostHeader: "vhost.internal", WAFDetect: true})
+	if err != nil {
+		t.Fatalf("NewProber: %v", err)
+	}
+
+	// Act
+	var results []Result
+	NewPipeline(nil, prober, PipelineConfig{Resolve: false}).
+		Run([]string{srv.URL}, func(r Result) { results = append(results, r) })
+
+	// Assert
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].HostHeader != "vhost.internal" {
+		t.Errorf("host_header = %q, want vhost.internal", results[0].HostHeader)
+	}
+	if results[0].WAF != "" {
+		t.Errorf("unexpected WAF detected on plain server: %q", results[0].WAF)
+	}
+}
+
 // TestPipelineBadTargetEmitsFailure verifies garbage input produces a failed
 // record rather than a panic or silent drop.
 func TestPipelineBadTargetEmitsFailure(t *testing.T) {

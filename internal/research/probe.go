@@ -28,15 +28,22 @@ type ProbeConfig struct {
 	TLSImpersonate string
 	// Extractor, when non-nil, runs body-extraction passes on each response.
 	Extractor *Extractor
+	// HostHeader, when set, overrides the Host header on every request (vhost
+	// probing — the jsifuentes custom-hosts capability).
+	HostHeader string
+	// WAFDetect runs response-evidence WAF fingerprinting on each response.
+	WAFDetect bool
 }
 
 // Prober wraps the httpx probing engine. It is safe for concurrent use: the
 // underlying *httpx.HTTPX performs per-request work and holds no mutable
 // per-call state.
 type Prober struct {
-	engine    *httpx.HTTPX
-	tlsGrab   bool
-	extractor *Extractor
+	engine     *httpx.HTTPX
+	tlsGrab    bool
+	extractor  *Extractor
+	hostHeader string
+	wafDetect  bool
 }
 
 // NewProber builds a Prober from cfg, layering overrides onto httpx defaults.
@@ -67,7 +74,13 @@ func NewProber(cfg ProbeConfig) (*Prober, error) {
 	if err != nil {
 		return nil, fmt.Errorf("init httpx engine: %w", err)
 	}
-	return &Prober{engine: engine, tlsGrab: cfg.TLSGrab, extractor: cfg.Extractor}, nil
+	return &Prober{
+		engine:     engine,
+		tlsGrab:    cfg.TLSGrab,
+		extractor:  cfg.Extractor,
+		hostHeader: cfg.HostHeader,
+		wafDetect:  cfg.WAFDetect,
+	}, nil
 }
 
 // Probe performs a single HTTP request against targetURL and returns a copy of
@@ -81,6 +94,10 @@ func (p *Prober) Probe(base Result, targetURL, scheme, port string) Result {
 		out.Failed = true
 		out.Error = fmt.Sprintf("build request: %v", err)
 		return out
+	}
+	if p.hostHeader != "" {
+		req.Host = p.hostHeader // override Host for vhost probing
+		out.HostHeader = p.hostHeader
 	}
 
 	resp, err := p.engine.Do(req, httpx.UnsafeOptions{})
@@ -103,6 +120,9 @@ func (p *Prober) Probe(base Result, targetURL, scheme, port string) Result {
 
 	if p.tlsGrab && resp.TLSData != nil {
 		out.TLS = mapTLS(resp.TLSData)
+	}
+	if p.wafDetect {
+		out.WAF = DetectWAF(resp.Headers, resp.Data)
 	}
 	if p.extractor != nil && len(resp.Data) > 0 {
 		ex := p.extractor.Extract(targetURL, resp.Data)
