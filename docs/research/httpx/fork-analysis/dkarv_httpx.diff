@@ -1,0 +1,150 @@
+diff --git a/runner/headless.go b/runner/headless.go
+index 3d295d8..8cc326c 100644
+--- a/runner/headless.go
++++ b/runner/headless.go
+@@ -133,6 +133,24 @@ func (b *Browser) ScreenshotWithBody(url string, timeout time.Duration, idle tim
+ 	return screenshot, body, networkRequests, nil
+ }
+ 
++// NavigatePage opens a page, navigates to url and waits for it to load, returning
++// the live page for the caller to interact with (e.g. runtime evidence collection).
++// The caller is responsible for closing the returned page.
++func (b *Browser) NavigatePage(url string, timeout time.Duration, headers []string) (*rod.Page, error) {
++	page, _, err := b.setupPageAndNavigate(url, timeout, headers, nil)
++	if err != nil {
++		if page != nil {
++			b.closePage(page)
++		}
++		return nil, err
++	}
++	if err := page.WaitLoad(); err != nil {
++		b.closePage(page)
++		return nil, err
++	}
++	return page, nil
++}
++
+ // setupPageAndNavigate opens a page, performs all adaptive actions including JS injection
+ func (b *Browser) setupPageAndNavigate(url string, timeout time.Duration, headers []string, jsCodes []string) (*rod.Page, []NetworkRequest, error) {
+ 	page, err := b.engine.Page(proto.TargetCreateTarget{})
+diff --git a/runner/options.go b/runner/options.go
+index f636b9d..54d2526 100644
+--- a/runner/options.go
++++ b/runner/options.go
+@@ -86,6 +86,7 @@ type ScanOptions struct {
+ 	NoFallback                bool
+ 	NoFallbackScheme          bool
+ 	TechDetect                bool
++	TechDetectRuntime         bool
+ 	CPEDetect                 bool
+ 	WordPress                 bool
+ 	StoreChain                bool
+@@ -151,6 +152,7 @@ func (s *ScanOptions) Clone() *ScanOptions {
+ 		NoFallback:                s.NoFallback,
+ 		NoFallbackScheme:          s.NoFallbackScheme,
+ 		TechDetect:                s.TechDetect,
++		TechDetectRuntime:         s.TechDetectRuntime,
+ 		CPEDetect:                 s.CPEDetect,
+ 		WordPress:                 s.WordPress,
+ 		StoreChain:                s.StoreChain,
+@@ -268,6 +270,7 @@ type Options struct {
+ 	NoFallback                bool
+ 	NoFallbackScheme          bool
+ 	TechDetect                bool
++	TechDetectRuntime         bool
+ 	CPEDetect                 bool
+ 	WordPress                 bool
+ 	CustomFingerprintFile     string
+@@ -436,6 +439,7 @@ func ParseOptions() *Options {
+ 		flagSet.DurationVarP(&options.ScreenshotTimeout, "screenshot-timeout", "st", 10*time.Second, "set timeout for screenshot in seconds"),
+ 		flagSet.DurationVarP(&options.ScreenshotIdle, "screenshot-idle", "sid", 1*time.Second, "set idle time before taking screenshot in seconds"),
+ 		flagSet.StringSliceVarP(&options.JavascriptCodes, "javascript-code", "jsc", nil, "execute JavaScript code after navigation", goflags.StringSliceOptions),
++		flagSet.BoolVarP(&options.TechDetectRuntime, "tech-detect-runtime", "tdr", false, "enable browser-based runtime technology detection using a headless browser (requires -tech-detect)"),
+ 	)
+ 
+ 	flagSet.CreateGroup("matchers", "Matchers",
+diff --git a/runner/runner.go b/runner/runner.go
+index ea0cac3..9cba499 100644
+--- a/runner/runner.go
++++ b/runner/runner.go
+@@ -76,6 +76,7 @@ import (
+ 	iputil "github.com/projectdiscovery/utils/ip"
+ 	syncutil "github.com/projectdiscovery/utils/sync"
+ 	wappalyzer "github.com/projectdiscovery/wappalyzergo"
++	wappalyzerheadless "github.com/projectdiscovery/wappalyzergo/headless"
+ )
+ 
+ // Runner is a client for running the enumeration process.
+@@ -348,7 +349,7 @@ func New(options *Options) (*Runner, error) {
+ 	scanopts.MaxResponseBodySizeToSave = options.MaxResponseBodySizeToSave
+ 	scanopts.MaxResponseBodySizeToRead = options.MaxResponseBodySizeToRead
+ 	scanopts.extractRegexps = make(map[string]*regexp.Regexp)
+-	if options.Screenshot {
++	if options.Screenshot || options.TechDetectRuntime {
+ 		browser, err := NewBrowser(options.HTTPProxy, options.UseInstalledChrome, options.ParseHeadlessOptionalArguments())
+ 		if err != nil {
+ 			return nil, err
+@@ -356,6 +357,7 @@ func New(options *Options) (*Runner, error) {
+ 		runner.browser = browser
+ 	}
+ 	scanopts.Screenshot = options.Screenshot
++	scanopts.TechDetectRuntime = options.TechDetectRuntime
+ 	scanopts.NoScreenshotBytes = options.NoScreenshotBytes
+ 	scanopts.NoHeadlessBody = options.NoHeadlessBody
+ 	scanopts.NoScreenshotFullPage = options.NoScreenshotFullPage
+@@ -677,6 +679,26 @@ func (r *Runner) classifyPage(headlessBody, body string, pHash uint64) map[strin
+ 	return kb
+ }
+ 
++// fingerprintTechnologiesWithRuntime renders fullURL in the headless browser and runs
++// wappalyzer's runtime fingerprinting against it, combining the passive header/body
++// evidence with JavaScript/DOM/script evidence collected from the rendered page.
++func (r *Runner) fingerprintTechnologiesWithRuntime(fullURL string, headers map[string][]string, body []byte, timeout time.Duration) (map[string]struct{}, error) {
++	page, err := r.browser.NavigatePage(fullURL, timeout, r.options.CustomHeaders)
++	if err != nil {
++		return nil, err
++	}
++	defer func() { _ = page.Close() }()
++
++	ctx, cancel := context.WithTimeout(context.Background(), timeout)
++	defer cancel()
++
++	collector := wappalyzerheadless.New(page)
++	return r.wappalyzer.FingerprintWithRuntime(ctx, headers, body, wappalyzer.RuntimeOptions{
++		Collector: collector,
++		Timeout:   timeout,
++	})
++}
++
+ func (r *Runner) testAndSet(k string) bool {
+ 	r.seenMux.Lock()
+ 	defer r.seenMux.Unlock()
+@@ -2342,10 +2364,24 @@ retry:
+ 	technologyDetails := make(map[string]wappalyzer.AppInfo)
+ 	var technologies []string
+ 	if scanopts.TechDetect {
+-		matches := r.wappalyzer.FingerprintWithInfo(resp.Headers, resp.Data)
+-		for match, data := range matches {
+-			technologies = append(technologies, match)
+-			technologyDetails[match] = data
++		usedRuntimeDetection := false
++		if scanopts.TechDetectRuntime && r.browser != nil {
++			runtimeMatches, err := r.fingerprintTechnologiesWithRuntime(fullURL, resp.Headers, resp.Data, scanopts.ScreenshotTimeout)
++			if err != nil {
++				gologger.Warning().Msgf("Could not run runtime technology detection '%s': %s", fullURL, err)
++			} else {
++				for match := range runtimeMatches {
++					technologies = append(technologies, match)
++				}
++				usedRuntimeDetection = true
++			}
++		}
++		if !usedRuntimeDetection {
++			matches := r.wappalyzer.FingerprintWithInfo(resp.Headers, resp.Data)
++			for match, data := range matches {
++				technologies = append(technologies, match)
++				technologyDetails[match] = data
++			}
+ 		}
+ 	}
+ 

@@ -1,0 +1,67 @@
+diff --git a/runner/options.go b/runner/options.go
+index d12a7da..72d2d12 100644
+--- a/runner/options.go
++++ b/runner/options.go
+@@ -329,6 +329,7 @@ type Options struct {
+ 	OnResult             OnResultCallback
+ 	DisableUpdateCheck   bool
+ 	NoDecode             bool
++	PathAsIs             bool
+ 	Screenshot           bool
+ 	UseInstalledChrome   bool
+ 	TlsImpersonate       bool
+@@ -547,6 +548,7 @@ func ParseOptions() *Options {
+ 		flagSet.BoolVarP(&options.LeaveDefaultPorts, "leave-default-ports", "ldp", false, "leave default http/https ports in host header (eg. http://host:80 - https://host:443"),
+ 		flagSet.BoolVar(&options.ZTLS, "ztls", false, "use ztls library with autofallback to standard one for tls13"),
+ 		flagSet.BoolVar(&options.NoDecode, "no-decode", false, "avoid decoding body"),
++		flagSet.BoolVar(&options.PathAsIs, "path-as-is", false, "use the raw input URL path without any normalization"),
+ 		flagSet.BoolVarP(&options.TlsImpersonate, "tls-impersonate", "tlsi", false, "enable experimental client hello (ja3) tls randomization"),
+ 		flagSet.BoolVar(&options.DisableStdin, "no-stdin", false, "Disable Stdin processing"),
+ 		flagSet.StringVarP(&options.HttpApiEndpoint, "http-api-endpoint", "hae", "", "experimental http api endpoint"),
+diff --git a/runner/runner.go b/runner/runner.go
+index d015066..50e49ca 100644
+--- a/runner/runner.go
++++ b/runner/runner.go
+@@ -211,7 +211,7 @@ func New(options *Options) (*Runner, error) {
+ 		options.Proxy = options.SocksProxy
+ 	}
+ 	httpxOptions.Proxy = options.Proxy
+-	httpxOptions.Unsafe = options.Unsafe
++	httpxOptions.Unsafe = options.Unsafe || options.PathAsIs
+ 	httpxOptions.UnsafeURI = options.RequestURI
+ 	httpxOptions.CdnCheck = options.OutputCDN
+ 	httpxOptions.ExcludeCdn = runner.excludeCdn
+@@ -330,7 +330,7 @@ func New(options *Options) (*Runner, error) {
+ 	scanopts.VHostInput = options.VHostInput
+ 	scanopts.OutputContentType = options.OutputContentType
+ 	scanopts.RequestBody = options.RequestBody
+-	scanopts.Unsafe = options.Unsafe
++	scanopts.Unsafe = options.Unsafe || options.PathAsIs
+ 	scanopts.Pipeline = options.Pipeline
+ 	scanopts.HTTP2Probe = options.HTTP2Probe
+ 	scanopts.OutputMethod = options.OutputMethod
+@@ -1867,6 +1867,24 @@ retry:
+ 	if err := URL.MergePath(scanopts.RequestURI, scanopts.Unsafe); err != nil {
+ 		gologger.Debug().Msgf("failed to merge paths of url %v and %v", URL.String(), scanopts.RequestURI)
+ 	}
++	// --path-as-is: extract the raw path from the original input URL to
++	// bypass Go's net/url normalization (percent-decoding, dot-segment
++	// resolution, etc.).  The extracted path is forwarded to rawhttp which
++	// writes it verbatim into the HTTP request line.
++	if r.options.PathAsIs {
++		if idx := strings.Index(target.Host, "://"); idx != -1 {
++			afterScheme := target.Host[idx+3:]
++			if slashIdx := strings.Index(afterScheme, "/"); slashIdx != -1 {
++				reqURI = afterScheme[slashIdx:]
++				// strip query/fragment — they are handled separately
++				for _, sep := range []string{"?", "#"} {
++					if ci := strings.Index(reqURI, sep); ci != -1 {
++						reqURI = reqURI[:ci]
++					}
++				}
++			}
++		}
++	}
+ 	var (
+ 		req *retryablehttp.Request
+ 		ctx context.Context

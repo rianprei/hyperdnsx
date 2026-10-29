@@ -1,0 +1,214 @@
+diff --git a/README.md b/README.md
+index aa25848..f8a8484 100644
+--- a/README.md
++++ b/README.md
+@@ -46,6 +46,7 @@
+ |-----------------|---------------|----------------|---------------|
+ | URL             | true          | IP             | true          |
+ | Title           | true          | CNAME          | true          |
++| Copyright       | false         | ASN            | false         |
+ | Status Code     | true          | Raw HTTP       | false         |
+ | Content Length  | true          | HTTP2          | false         |
+ | TLS Certificate | true          | HTTP Pipeline  | false         |
+@@ -58,7 +59,7 @@
+ | Favicon Hash    | false         | Probe  Status  | false         |
+ | Body Hash       | true          | Header  Hash   | true          |
+ | Redirect chain  | false         | URL Scheme     | true          |
+-| JARM Hash       | false         | ASN            | false         |
++| JARM Hash       | false         |                |               |
+ 
+ # Installation Instructions
+ 
+@@ -112,6 +113,7 @@ PROBES:
+    -lc, -line-count       display response body line count
+    -wc, -word-count       display response body word count
+    -title                 display page title
++   -copyright             display copyright dates and potential years
+    -bp, -body-preview     display first N characters of response body (default 100)
+    -server, -web-server   display server name
+    -td, -tech-detect      display technology in use based on wappalyzer dataset
+diff --git a/common/httpx/copyright.go b/common/httpx/copyright.go
+new file mode 100644
+index 0000000..f647c3f
+--- /dev/null
++++ b/common/httpx/copyright.go
+@@ -0,0 +1,87 @@
++package httpx
++
++import (
++	"regexp"
++	"sort"
++	"strings"
++)
++
++var crreYear = regexp.MustCompile(`(?:copyright|Copyright|COPYRIGHT|\(C\)|\(c\)|©|&copy;|&#169;)?\s*(?:[a-zA-Z0-9 ,-]+\s*)?[\s,]*(199[0-9]|20[0-1][0-9]|202[0-4])[\s,<-]+(?:copyright|Copyright|COPYRIGHT|\(C\)|\(c\)|©|&copy;|&#169;|199[0-9]|20[0-1][0-9]|202[0-4])?`)
++
++
++func cleanText(text string) string {
++    text = strings.ReplaceAll(text, "<span>", "")
++    text = strings.ReplaceAll(text, "</span>", "")
++    text = strings.ReplaceAll(text, "\u00a0", " ")
++    text = strings.ReplaceAll(text, "&#xA9;", "&#169;")
++    text = strings.ReplaceAll(text, "–", "-")
++    text = strings.ReplaceAll(text, "-->", "")
++    text = strings.ReplaceAll(text, "<!--", "")
++    return text
++}
++
++// ExtractCopyright extracts all copyright dates or years from the raw response body and returns them as a space-delimited string
++func ExtractCopyright(resp *Response) string {
++	var years []string            // To store all matched years
++	var copyrightyears []string   // To store any bonafide copyrights
++	var copyrightresults string   // Declare variables outside the blocks
++	var yearresults string
++
++	// Convert response data to string and clean it
++	textContent := string(resp.Data)
++	textContent = cleanText(textContent)
++
++
++	// Apply regex to extract the years and check for indicators
++	matches := crreYear.FindAllStringSubmatch(textContent, -1)
++	for _, match := range matches {
++		year := strings.TrimSpace(match[1])
++
++		// Check if the year has a copyright indicator around it
++		if strings.Contains(match[0], "copyright") || strings.Contains(match[0], "Copyright") || strings.Contains(match[0], "COPYRIGHT") || strings.Contains(match[0], "(C)") || strings.Contains(match[0], "(c)") || strings.Contains(match[0], "©") || strings.Contains(match[0], "&#169;") || strings.Contains(match[0], "&copy;") {
++			copyrightyears = append(copyrightyears, year)
++		}
++
++		years = append(years, year)
++	}
++
++	// If we have any copyrights found, craft our string
++	if len(copyrightyears) > 0 {
++		// Sort, unique, and flatten our array
++		sort.Strings(copyrightyears)
++
++		// Make the years list unique
++		uniqueCopyrightYears := make([]string, 0, len(copyrightyears))
++		seen := make(map[string]bool)
++		for _, copyrightyear := range copyrightyears {
++			if !seen[copyrightyear] {
++				uniqueCopyrightYears = append(uniqueCopyrightYears, copyrightyear)
++				seen[copyrightyear] = true
++			}
++		}
++
++		green := "\033[32m"
++		reset := "\033[0m"
++		copyrightresults = "Copyright: " + green + strings.Join(uniqueCopyrightYears, " ") + reset
++		return copyrightresults
++	}
++
++	if len(years) > 0 {
++		sort.Strings(years)
++
++		// Make the years list unique
++		uniqueYears := make([]string, 0, len(years))
++		seen := make(map[string]bool)
++		for _, year := range years {
++			if !seen[year] {
++				uniqueYears = append(uniqueYears, year)
++				seen[year] = true
++			}
++		}
++		yearresults = "Possible Years: " + strings.Join(uniqueYears, " ")
++		return yearresults
++	}
++
++	return ""
++}
++
+diff --git a/runner/options.go b/runner/options.go
+index c09944d..6a14704 100644
+--- a/runner/options.go
++++ b/runner/options.go
+@@ -57,7 +57,8 @@ type ScanOptions struct {
+ 	RequestBody               string
+ 	VHost                     bool
+ 	OutputTitle               bool
+-	OutputStatusCode          bool
++	OutputCopyright	          bool
++	OutputStatusCode	  bool
+ 	OutputLocation            bool
+ 	OutputContentLength       bool
+ 	StoreResponse             bool
+@@ -116,6 +117,7 @@ func (s *ScanOptions) Clone() *ScanOptions {
+ 		RequestBody:               s.RequestBody,
+ 		VHost:                     s.VHost,
+ 		OutputTitle:               s.OutputTitle,
++		OutputCopyright:           s.OutputCopyright,
+ 		OutputStatusCode:          s.OutputStatusCode,
+ 		OutputLocation:            s.OutputLocation,
+ 		OutputContentLength:       s.OutputContentLength,
+@@ -206,6 +208,7 @@ type Options struct {
+ 	VHostInput                bool
+ 	Smuggling                 bool
+ 	ExtractTitle              bool
++	ExtractCopyright          bool
+ 	StatusCode                bool
+ 	Location                  bool
+ 	ContentLength             bool
+@@ -366,6 +369,7 @@ func ParseOptions() *Options {
+ 		flagSet.BoolVarP(&options.OutputLinesCount, "line-count", "lc", false, "display response body line count"),
+ 		flagSet.BoolVarP(&options.OutputWordsCount, "word-count", "wc", false, "display response body word count"),
+ 		flagSet.BoolVar(&options.ExtractTitle, "title", false, "display page title"),
++		flagSet.BoolVar(&options.ExtractCopyright, "copyright", false, "display copyright year"),
+ 		flagSet.DynamicVarP(&options.ResponseBodyPreviewSize, "body-preview", "bp", 100, "display first N characters of response body"),
+ 		flagSet.BoolVarP(&options.OutputServerHeader, "web-server", "server", false, "display server name"),
+ 		flagSet.BoolVarP(&options.TechDetect, "tech-detect", "td", false, "display technology in use based on wappalyzer dataset"),
+diff --git a/runner/runner.go b/runner/runner.go
+index 4b80615..591829a 100644
+--- a/runner/runner.go
++++ b/runner/runner.go
+@@ -245,6 +245,7 @@ func New(options *Options) (*Runner, error) {
+ 	runner.options.protocol = httpx.HTTPorHTTPS
+ 	scanopts.VHost = options.VHost
+ 	scanopts.OutputTitle = options.ExtractTitle
++	scanopts.OutputCopyright = options.ExtractCopyright
+ 	scanopts.OutputStatusCode = options.StatusCode
+ 	scanopts.OutputLocation = options.Location
+ 	scanopts.OutputContentLength = options.ContentLength
+@@ -1800,6 +1801,21 @@ retry:
+ 		builder.WriteRune(']')
+ 	}
+ 
++	var copyright string
++	if httpx.CanHaveTitleTag(resp.GetHeaderPart("Content-Type", ";")) {
++	    copyright = httpx.ExtractCopyright(resp)  // This will return a space-delimited string of years
++	}
++
++	if scanopts.OutputCopyright && copyright != "" {
++	    builder.WriteString(" [")
++	    if !scanopts.OutputWithNoColor {
++	        builder.WriteString(aurora.Cyan(copyright).String())
++	    } else {
++	        builder.WriteString(copyright)
++	    }
++	    builder.WriteRune(']')
++	}
++
+ 	var bodyPreview string
+ 	if r.options.ResponseBodyPreviewSize > 0 && resp != nil {
+ 		bodyPreview = string(resp.Data)
+@@ -2243,6 +2259,7 @@ retry:
+ 		Location:         resp.GetHeaderPart("Location", ";"),
+ 		ContentType:      resp.GetHeaderPart("Content-Type", ";"),
+ 		Title:            title,
++		Copyright:        copyright,
+ 		str:              builder.String(),
+ 		VHost:            isvhost,
+ 		WebServer:        serverHeader,
+diff --git a/runner/types.go b/runner/types.go
+index 7bdb3a9..4437ff7 100644
+--- a/runner/types.go
++++ b/runner/types.go
+@@ -49,6 +49,7 @@ type Result struct {
+ 	Input              string                        `json:"input,omitempty" csv:"input" mapstructure:"input"`
+ 	Location           string                        `json:"location,omitempty" csv:"location" mapstructure:"location"`
+ 	Title              string                        `json:"title,omitempty" csv:"title" mapstructure:"title"`
++	Copyright          string	                 `json:"copyright,omitempty" csv:"copyright" mapstructure:"copyright"`
+ 	str                string                        `mapstructure:"-"`
+ 	Scheme             string                        `json:"scheme,omitempty" csv:"scheme" mapstructure:"scheme"`
+ 	Error              string                        `json:"error,omitempty" csv:"error" mapstructure:"error"`

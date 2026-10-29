@@ -1,0 +1,576 @@
+diff --git a/README.md b/README.md
+index c701787..99216c3 100644
+--- a/README.md
++++ b/README.md
+@@ -1,74 +1,29 @@
+-<h1 align="center">
+-  <img src="static/httpx-logo.png" alt="httpx" width="200px">
+-  <br>
+-</h1>
+-
+-
+-
+-<p align="center">
+-<a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/license-MIT-_red.svg"></a>
+-<a href="https://goreportcard.com/badge/github.com/projectdiscovery/httpx"><img src="https://goreportcard.com/badge/github.com/projectdiscovery/httpx"></a>
+-<a href="https://github.com/projectdiscovery/httpx/releases"><img src="https://img.shields.io/github/release/projectdiscovery/httpx"></a>
+-<a href="https://hub.docker.com/r/projectdiscovery/httpx"><img src="https://img.shields.io/docker/pulls/projectdiscovery/httpx.svg"></a>
+-<a href="https://twitter.com/pdiscoveryio"><img src="https://img.shields.io/twitter/follow/pdiscoveryio.svg?logo=twitter"></a>
+-<a href="https://discord.gg/projectdiscovery"><img src="https://img.shields.io/discord/695645237418131507.svg?logo=discord"></a>
+-</p>
+-
+-<p align="center">
+-  <a href="#features">Features</a> •
+-  <a href="#installation-instructions">Installation</a> •
+-  <a href="#usage">Usage</a> •
+-  <a href="https://docs.projectdiscovery.io/tools/httpx/">Documentation</a> •
+-  <a href="#notes">Notes</a> •
+-  <a href="https://discord.gg/projectdiscovery">Join Discord</a>
+-</p>
++Just an extra flag, yet, for direct /enpoint recon which is -ep which is so handy and existing -ep flag changed as -epc...
+ 
+-
+-`httpx` is a fast and multi-purpose HTTP toolkit that allows running multiple probes using the [retryablehttp](https://github.com/projectdiscovery/retryablehttp-go) library. It is designed to maintain result reliability with an increased number of threads.
+-
+-# Features
++# Usage ScreenShot...
+ 
+ <h1 align="center">
+-  <img src="https://user-images.githubusercontent.com/8293321/135731750-4c1d38b1-bd2a-40f9-88e9-3c4b9f6da378.png" alt="httpx" width="700px">
++  <img src="https://github.com/pelamx/httpxCustom/blob/dev/usage.png" alt="httpxc" width="700px">
+   <br>
+ </h1>
+ 
+- - Simple and modular code base making it easy to contribute.
+- - Fast And fully configurable flags to probe multiple elements.
+- - Supports multiple HTTP based probings.
+- - Smart auto fallback from https to http as default. 
+- - Supports hosts, URLs and CIDR as input.
+- - Handles edge cases doing retries, backoffs etc for handling WAFs.
+-
+-### Supported probes
+-
+-| Probes          | Default check | Probes         | Default check |
+-|-----------------|---------------|----------------|---------------|
+-| URL             | true          | IP             | true          |
+-| Title           | true          | CNAME          | true          |
+-| Status Code     | true          | Raw HTTP       | false         |
+-| Content Length  | true          | HTTP2          | false         |
+-| TLS Certificate | true          | HTTP Pipeline  | false         |
+-| CSP Header      | true          | Virtual host   | false         |
+-| Line Count      | true          | Word Count     | true          |
+-| Location Header | true          | CDN            | false         |
+-| Web Server      | true          | Paths          | false         |
+-| Web Socket      | true          | Ports          | false         |
+-| Response Time   | true          | Request Method | true          |
+-| Favicon Hash    | false         | Probe  Status  | false         |
+-| Body Hash       | true          | Header  Hash   | true          |
+-| Redirect chain  | false         | URL Scheme     | true          |
+-| JARM Hash       | false         | ASN            | false         |
+ 
+ # Installation Instructions
+ 
+-`httpx` requires **go >=1.24.0** to install successfully. Run the following command to get the repo:
++`httpxc` requires **go >=1.24.0** to install successfully. Run the following command to get the repo:
+ 
+ ```sh
+-go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
++GOPROXY=direct go install -v github.com/pelamx/httpxCustom/cmd/httpxc@dev
++```
++# Alternative Installation (if above doesn't work):
++```
++git clone https://github.com/pelamx/httpxCustom
++cd httpxCustom/cmd/httpxc
++go build
++sudo mv httpxc /usr/local/bin/
+ ```
+ 
+-To learn more about installing httpx, see https://docs.projectdiscovery.io/tools/httpx/install.
++For original tool, see https://docs.projectdiscovery.io/tools/httpx/install.
+ 
+ | :exclamation:  **Disclaimer**  |
+ |---------------------------------|
+@@ -78,17 +33,16 @@ To learn more about installing httpx, see https://docs.projectdiscovery.io/tools
+ # Usage
+ 
+ ```sh
+-httpx -h
++httpxc -h
+ ```
+ 
+-This will display help for the tool. Here are all the switches it supports.
++Everything same except the new flag. 
+ 
+ 
+ ```console
+-httpx is a fast and multi-purpose HTTP toolkit that allows running multiple probes using the retryablehttp library.
+ 
+ Usage:
+-  ./httpx [flags]
++  ./httpxc [flags]
+ 
+ Flags:
+ INPUT:
+@@ -120,6 +74,7 @@ PROBES:
+    -asn                   display host asn information
+    -cdn                   display cdn/waf in use (default true)
+    -probe                 display probe status
++   -ep                    added new flag -ep (endpoint) which can add sub.domain.tld requested endpoint for direct endpoint targeting.
+ 
+ HEADLESS:
+    -ss, -screenshot                 enable saving screenshot of the page using headless browser
+@@ -146,7 +101,7 @@ MATCHERS:
+ 
+ EXTRACTOR:
+    -er, -extract-regex string[]   display response content with matched regex
+-   -ep, -extract-preset string[]  display response content matched by a pre-defined regex (url,ipv4,mail)
++   -epr, -extract-preset string[]  display response content matched by a pre-defined regex (url,ipv4,mail) #changed from -ep to -epr for new endpoint feaiture
+ 
+ FILTERS:
+    -fc, -filter-code string            filter response with specified status code (-fc 403,401)
+@@ -267,44 +222,3 @@ CLOUD:
+    -pdu, -dashboard-upload string  upload httpx output file (jsonl) in projectdiscovery cloud (pdcp) UI dashboard
+ ```
+ 
+-# Running httpx
+-
+-For details about running httpx, see https://docs.projectdiscovery.io/tools/httpx/running.
+-
+-### Using `httpx` as a library
+-`httpx` can be used as a library by creating an instance of the `Option` struct and populating it with the same options that would be specified via CLI. Once validated, the struct should be passed to a runner instance (to be closed at the end of the program) and the `RunEnumeration` method should be called. A minimal example of how to do it is in the [examples](examples/) folder
+-
+-# Notes
+-
+-- As default, `httpx` probe with **HTTPS** scheme and fall-back to **HTTP** only if **HTTPS** is not reachable.
+-- The `-no-fallback` flag can be used to probe and display both **HTTP** and **HTTPS** result.
+-- Custom scheme for ports can be defined, for example `-ports http:443,http:80,https:8443`
+-- Custom resolver supports multiple protocol (**doh|tcp|udp**) in form of `protocol:resolver:port` (e.g. `udp:127.0.0.1:53`)
+-- The following flags should be used for specific use cases instead of running them as default with other probes:
+-   - `-ports`
+-   - `-path`
+-   - `-vhost`
+-   - `-screenshot`
+-   - `-csp-probe`
+-   - `-tls-probe`
+-   - `-favicon`
+-   - `-http2`
+-   - `-pipeline`
+-   - `-tls-impersonate`
+-
+-
+-# Acknowledgement
+-
+-Probing feature is inspired by [@tomnomnom/httprobe](https://github.com/tomnomnom/httprobe) work ❤️
+-
+-
+---------
+-
+-<div align="center">
+-
+-`httpx` is made with 💙 by the [projectdiscovery](https://projectdiscovery.io) team and distributed under [MIT License](LICENSE.md).
+-
+-
+-<a href="https://discord.gg/projectdiscovery"><img src="https://raw.githubusercontent.com/projectdiscovery/nuclei-burp-plugin/main/static/join-discord.png" width="300" alt="Join Discord"></a>
+-
+-</div>
+diff --git a/additionCustom.md b/additionCustom.md
+new file mode 100644
+index 0000000..675571c
+--- /dev/null
++++ b/additionCustom.md
+@@ -0,0 +1,18 @@
++added new flag -ep (endpoint) which can add sub.domain.tld requested endpoint for direct endpoint targeting. 
++
++usage examples:
++```bash
++subfinder -d google.com -all | httpxc -sc -ct -cl -td -location -title -ip -ep /logs
++cat subList.txt | httpxc -sc -ct -cl -td -location -title -ip -ep /logs
++httpxc -dL subList.txt -sc -ct -cl -td -location -title -ip -ep /logs
++```
++installation: 
++GOPROXY=direct go install -v github.com/pelamx/httpxCustom/cmd/httpxc@dev
++
++Alternative Installation (if above doesn't work):
++```bash
++git clone https://github.com/pelamx/httpxCustom
++cd httpxCustom/cmd/httpxc
++go build
++sudo mv httpxc /usr/local/bin/
++```
+diff --git a/cmd/functional-test/main.go b/cmd/functional-test/main.go
+index 1500ec6..efc1db9 100644
+--- a/cmd/functional-test/main.go
++++ b/cmd/functional-test/main.go
+@@ -11,7 +11,7 @@ import (
+ 	"github.com/logrusorgru/aurora"
+ 	"github.com/pkg/errors"
+ 
+-	"github.com/projectdiscovery/httpx/internal/testutils"
++	"github.com/pelamx/httpxCustom/internal/testutils"
+ )
+ 
+ var (
+diff --git a/cmd/httpx/httpx.go b/cmd/httpxc/httpx.go
+similarity index 97%
+rename from cmd/httpx/httpx.go
+rename to cmd/httpxc/httpx.go
+index 242ecc6..eacbd9f 100644
+--- a/cmd/httpx/httpx.go
++++ b/cmd/httpxc/httpx.go
+@@ -10,8 +10,8 @@ import (
+ 
+ 	"github.com/logrusorgru/aurora"
+ 	"github.com/projectdiscovery/gologger"
+-	"github.com/projectdiscovery/httpx/internal/pdcp"
+-	"github.com/projectdiscovery/httpx/runner"
++	"github.com/pelamx/httpxCustom/internal/pdcp"
++	"github.com/pelamx/httpxCustom/runner"
+ 	pdcpauth "github.com/projectdiscovery/utils/auth/pdcp"
+ 	_ "github.com/projectdiscovery/utils/pprof"
+ )
+diff --git a/cmd/integration-test/http.go b/cmd/integration-test/http.go
+index 1017997..51cf5a3 100644
+--- a/cmd/integration-test/http.go
++++ b/cmd/integration-test/http.go
+@@ -9,7 +9,7 @@ import (
+ 	"strings"
+ 
+ 	"github.com/julienschmidt/httprouter"
+-	"github.com/projectdiscovery/httpx/internal/testutils"
++	"github.com/pelamx/httpxCustom/internal/testutils"
+ 	fileutil "github.com/projectdiscovery/utils/file"
+ )
+ 
+@@ -19,14 +19,14 @@ var httpTestcases = map[string]testutils.TestCase{
+ 	"Raw HTTP GET Request":                                                                &standardHttpGet{unsafe: true},
+ 	"Raw request with non standard rfc path via stdin":                                    &standardHttpGet{unsafe: true, stdinPath: "/%invalid"},
+ 	"Raw request with non standard rfc path via cli flag":                                 &standardHttpGet{unsafe: true, path: "/%invalid"},
+-	"Regression test for: https://github.com/projectdiscovery/httpx/issues/363":           &issue363{},           // infinite redirect
+-	"Regression test for: https://github.com/projectdiscovery/httpx/issues/276":           &issue276{},           // full path with port in output
+-	"Regression test for: https://github.com/projectdiscovery/httpx/issues/277":           &issue277{},           // scheme://host:port via stdin
+-	"Regression test for: https://github.com/projectdiscovery/httpx/issues/303":           &issue303{},           // misconfigured gzip header with uncompressed body
+-	"Regression test for: https://github.com/projectdiscovery/httpx/issues/400":           &issue400{},           // post operation with body
+-	"Regression test for: https://github.com/projectdiscovery/httpx/issues/414":           &issue414{},           // stream mode with path
+-	"Regression test for unwanted chars":                                                  &titleUnwantedChars{}, // new line scanning with title flag, Regression test for: https://github.com/projectdiscovery/httpx/issues/433
+-	"Request URI to existing file - https://github.com/projectdiscovery/httpx/issues/480": &issue480{},           // request uri pointing to existing file
++	"Regression test for: https://github.com/pelamx/httpxCustom/issues/363":           &issue363{},           // infinite redirect
++	"Regression test for: https://github.com/pelamx/httpxCustom/issues/276":           &issue276{},           // full path with port in output
++	"Regression test for: https://github.com/pelamx/httpxCustom/issues/277":           &issue277{},           // scheme://host:port via stdin
++	"Regression test for: https://github.com/pelamx/httpxCustom/issues/303":           &issue303{},           // misconfigured gzip header with uncompressed body
++	"Regression test for: https://github.com/pelamx/httpxCustom/issues/400":           &issue400{},           // post operation with body
++	"Regression test for: https://github.com/pelamx/httpxCustom/issues/414":           &issue414{},           // stream mode with path
++	"Regression test for unwanted chars":                                                  &titleUnwantedChars{}, // new line scanning with title flag, Regression test for: https://github.com/pelamx/httpxCustom/issues/433
++	"Request URI to existing file - https://github.com/pelamx/httpxCustom/issues/480": &issue480{},           // request uri pointing to existing file
+ 	"Standard HTTP GET Request with match response time":                                  &standardHttpGet{mrt: true, inputValue: "\"<10s\""},
+ 	"Standard HTTP GET Request with filter response time":                                 &standardHttpGet{frt: true, inputValue: "\">3ms\""},
+ 	"Multiple Custom Header":                                                              &customHeader{inputData: []string{"-debug-req", "-H", "'user-agent: test'", "-H", "'foo: bar'"}, expectedOutput: []string{"User-Agent: test", "Foo: bar"}},
+diff --git a/cmd/integration-test/integration-test.go b/cmd/integration-test/integration-test.go
+index d5115e0..1b6adac 100644
+--- a/cmd/integration-test/integration-test.go
++++ b/cmd/integration-test/integration-test.go
+@@ -6,7 +6,7 @@ import (
+ 	"strings"
+ 
+ 	"github.com/logrusorgru/aurora"
+-	"github.com/projectdiscovery/httpx/internal/testutils"
++	"github.com/pelamx/httpxCustom/internal/testutils"
+ )
+ 
+ var (
+diff --git a/cmd/integration-test/library.go b/cmd/integration-test/library.go
+index afecc0a..3429f22 100644
+--- a/cmd/integration-test/library.go
++++ b/cmd/integration-test/library.go
+@@ -4,8 +4,8 @@ import (
+ 	"net/http"
+ 	"os"
+ 
+-	"github.com/projectdiscovery/httpx/internal/testutils"
+-	"github.com/projectdiscovery/httpx/runner"
++	"github.com/pelamx/httpxCustom/internal/testutils"
++	"github.com/pelamx/httpxCustom/runner"
+ )
+ 
+ var libraryTestcases = map[string]testutils.TestCase{
+@@ -47,7 +47,7 @@ func (h *httpxLibrary) Execute() error {
+ 
+ 	httpxRunner.RunEnumeration()
+ 
+-	// httpx removes default ports for simplicity Ref: https://pkg.go.dev/github.com/projectdiscovery/httpx/common/stringz#RemoveURLDefaultPort
++	// httpx removes default ports for simplicity Ref: https://pkg.go.dev/github.com/pelamx/httpxCustom/common/stringz#RemoveURLDefaultPort
+ 	expected := "https://scanme.sh"
+ 
+ 	if got != expected {
+@@ -97,7 +97,7 @@ func (h *httpxLibraryWithStream) Execute() error {
+ 
+ 	httpxRunner.RunEnumeration()
+ 
+-	// httpx removes default ports for simplicity Ref: https://pkg.go.dev/github.com/projectdiscovery/httpx/common/stringz#RemoveURLDefaultPort
++	// httpx removes default ports for simplicity Ref: https://pkg.go.dev/github.com/pelamx/httpxCustom/common/stringz#RemoveURLDefaultPort
+ 	expected := "https://scanme.sh"
+ 
+ 	if got != expected {
+diff --git a/common/customlist/customlist.go b/common/customlist/customlist.go
+index 0969cf9..c2be42b 100644
+--- a/common/customlist/customlist.go
++++ b/common/customlist/customlist.go
+@@ -1,6 +1,6 @@
+ package customlist
+ 
+-import "github.com/projectdiscovery/httpx/common/fileutil"
++import "github.com/pelamx/httpxCustom/common/fileutil"
+ 
+ const maxRecursion = 10
+ 
+diff --git a/common/customports/customport.go b/common/customports/customport.go
+index 0e9e5d3..ef0c77b 100644
+--- a/common/customports/customport.go
++++ b/common/customports/customport.go
+@@ -8,7 +8,7 @@ import (
+ 	"github.com/pkg/errors"
+ 	sliceutil "github.com/projectdiscovery/utils/slice"
+ 
+-	"github.com/projectdiscovery/httpx/common/httpx"
++	"github.com/pelamx/httpxCustom/common/httpx"
+ )
+ 
+ //nolint:gochecknoinits // this flag var needs a small refactor to avoid the use of the init function
+diff --git a/common/fileutil/fileutil.go b/common/fileutil/fileutil.go
+index 994587a..6376013 100644
+--- a/common/fileutil/fileutil.go
++++ b/common/fileutil/fileutil.go
+@@ -9,7 +9,7 @@ import (
+ 	"path/filepath"
+ 	"regexp"
+ 
+-	"github.com/projectdiscovery/httpx/common/stringz"
++	"github.com/pelamx/httpxCustom/common/stringz"
+ 	fileutil "github.com/projectdiscovery/utils/file"
+ )
+ 
+diff --git a/common/httpx/httpx.go b/common/httpx/httpx.go
+index 1b75ee8..cbd5935 100644
+--- a/common/httpx/httpx.go
++++ b/common/httpx/httpx.go
+@@ -16,7 +16,7 @@ import (
+ 	"github.com/projectdiscovery/cdncheck"
+ 	"github.com/projectdiscovery/fastdialer/fastdialer"
+ 	"github.com/projectdiscovery/fastdialer/fastdialer/ja3/impersonate"
+-	"github.com/projectdiscovery/httpx/common/httputilz"
++	"github.com/pelamx/httpxCustom/common/httputilz"
+ 	"github.com/projectdiscovery/networkpolicy"
+ 	"github.com/projectdiscovery/rawhttp"
+ 	retryablehttp "github.com/projectdiscovery/retryablehttp-go"
+diff --git a/common/httpx/option.go b/common/httpx/option.go
+index b64cfd3..064ee17 100644
+--- a/common/httpx/option.go
++++ b/common/httpx/option.go
+@@ -74,7 +74,7 @@ var DefaultOptions = Options{
+ 	VHostIgnoreNumberOfLines: false,
+ 	VHostStripHTML:           false,
+ 	VHostSimilarityRatio:     85,
+-	DefaultUserAgent:         "httpx - Open-source project (github.com/projectdiscovery/httpx)",
++	DefaultUserAgent:         "httpx - Open-source project (github.com/pelamx/httpxCustom)",
+ }
+ 
+ func (options *Options) parseCustomCookies() {
+diff --git a/examples/simple/main.go b/examples/simple/main.go
+index 5b14cb0..2979229 100644
+--- a/examples/simple/main.go
++++ b/examples/simple/main.go
+@@ -7,7 +7,7 @@ import (
+ 	"github.com/projectdiscovery/goflags"
+ 	"github.com/projectdiscovery/gologger"
+ 	"github.com/projectdiscovery/gologger/levels"
+-	"github.com/projectdiscovery/httpx/runner"
++	"github.com/pelamx/httpxCustom/runner"
+ )
+ 
+ func main() {
+diff --git a/examples/speed_control/main.go b/examples/speed_control/main.go
+index ae3d4dd..d619e5c 100644
+--- a/examples/speed_control/main.go
++++ b/examples/speed_control/main.go
+@@ -11,7 +11,7 @@ import (
+ 	"github.com/projectdiscovery/goflags"
+ 	"github.com/projectdiscovery/gologger"
+ 	"github.com/projectdiscovery/gologger/levels"
+-	"github.com/projectdiscovery/httpx/runner"
++	"github.com/pelamx/httpxCustom/runner"
+ )
+ 
+ func main() {
+diff --git a/internal/pdcp/writer.go b/internal/pdcp/writer.go
+index fbad91a..9361270 100644
+--- a/internal/pdcp/writer.go
++++ b/internal/pdcp/writer.go
+@@ -13,7 +13,7 @@ import (
+ 	"time"
+ 
+ 	"github.com/projectdiscovery/gologger"
+-	"github.com/projectdiscovery/httpx/runner"
++	"github.com/pelamx/httpxCustom/runner"
+ 	"github.com/projectdiscovery/retryablehttp-go"
+ 	pdcpauth "github.com/projectdiscovery/utils/auth/pdcp"
+ 	"github.com/projectdiscovery/utils/conversion"
+diff --git a/runner/headless.go b/runner/headless.go
+index f661639..171c1f7 100644
+--- a/runner/headless.go
++++ b/runner/headless.go
+@@ -38,7 +38,7 @@ type Browser struct {
+ 	engine  *rod.Browser
+ 	// TODO: Remove the Chrome PID kill code in favor of using Leakless(true).
+ 	// This change will be made if there are no complaints about zombie Chrome processes.
+-	// Reference: https://github.com/projectdiscovery/httpx/pull/1426
++	// Reference: https://github.com/pelamx/httpxCustom/pull/1426
+ 	// pids    map[int32]struct{}
+ }
+ 
+diff --git a/runner/options.go b/runner/options.go
+index 0e41fd2..38dfce4 100644
+--- a/runner/options.go
++++ b/runner/options.go
+@@ -18,13 +18,13 @@ import (
+ 	"github.com/projectdiscovery/gologger"
+ 	"github.com/projectdiscovery/gologger/formatter"
+ 	"github.com/projectdiscovery/gologger/levels"
+-	"github.com/projectdiscovery/httpx/common/customextract"
+-	"github.com/projectdiscovery/httpx/common/customheader"
+-	"github.com/projectdiscovery/httpx/common/customlist"
+-	customport "github.com/projectdiscovery/httpx/common/customports"
+-	fileutilz "github.com/projectdiscovery/httpx/common/fileutil"
+-	"github.com/projectdiscovery/httpx/common/httpx"
+-	"github.com/projectdiscovery/httpx/common/stringz"
++	"github.com/pelamx/httpxCustom/common/customextract"
++	"github.com/pelamx/httpxCustom/common/customheader"
++	"github.com/pelamx/httpxCustom/common/customlist"
++	customport "github.com/pelamx/httpxCustom/common/customports"
++	fileutilz "github.com/pelamx/httpxCustom/common/fileutil"
++	"github.com/pelamx/httpxCustom/common/httpx"
++	"github.com/pelamx/httpxCustom/common/stringz"
+ 	"github.com/projectdiscovery/networkpolicy"
+ 	pdcpauth "github.com/projectdiscovery/utils/auth/pdcp"
+ 	"github.com/projectdiscovery/utils/env"
+@@ -192,6 +192,7 @@ type Options struct {
+ 	Methods                   string
+ 	RequestURI                string
+ 	RequestURIs               string
++	Endpoint                  string
+ 	requestURIs               []string
+ 	OutputMatchStatusCode     string
+ 	OutputMatchContentLength  string
+@@ -425,7 +426,7 @@ func ParseOptions() *Options {
+ 
+ 	flagSet.CreateGroup("extractor", "Extractor",
+ 		flagSet.StringSliceVarP(&options.OutputExtractRegexs, "extract-regex", "er", nil, "display response content with matched regex", goflags.StringSliceOptions),
+-		flagSet.StringSliceVarP(&options.OutputExtractPresets, "extract-preset", "ep", nil, fmt.Sprintf("display response content matched by a pre-defined regex (%s)", strings.Join(maps.Keys(customextract.ExtractPresets), ",")), goflags.StringSliceOptions),
++		flagSet.StringSliceVarP(&options.OutputExtractPresets, "extract-preset", "epr", nil, fmt.Sprintf("display response content matched by a pre-defined regex (%s)", strings.Join(maps.Keys(customextract.ExtractPresets), ",")), goflags.StringSliceOptions),
+ 	)
+ 
+ 	flagSet.CreateGroup("filters", "Filters",
+@@ -456,6 +457,7 @@ func ParseOptions() *Options {
+ 		flagSet.BoolVarP(&options.ProbeAllIPS, "probe-all-ips", "pa", false, "probe all the ips associated with same host"),
+ 		flagSet.VarP(&options.CustomPorts, "ports", "p", "ports to probe (nmap syntax: eg http:1,2-10,11,https:80)"),
+ 		flagSet.StringVar(&options.RequestURIs, "path", "", "path or list of paths to probe (comma-separated, file)"),
++		flagSet.StringVarP(&options.Endpoint, "endpoint", "ep", "", "add endpoint to each URL. (e.g. /endpoint)"),
+ 		flagSet.BoolVar(&options.TLSProbe, "tls-probe", false, "send http probes on the extracted TLS domains (dns_name)"),
+ 		flagSet.BoolVar(&options.CSPProbe, "csp-probe", false, "send http probes on the extracted CSP domains"),
+ 		flagSet.BoolVar(&options.TLSGrab, "tls-grab", false, "perform TLS(SSL) data grabbing"),
+diff --git a/runner/ports_optimization.go b/runner/ports_optimization.go
+index 4ccb9e7..c1b3f44 100644
+--- a/runner/ports_optimization.go
++++ b/runner/ports_optimization.go
+@@ -4,7 +4,7 @@ import (
+ 	"net"
+ 	"strconv"
+ 
+-	"github.com/projectdiscovery/httpx/common/httpx"
++	"github.com/pelamx/httpxCustom/common/httpx"
+ 	sliceutil "github.com/projectdiscovery/utils/slice"
+ )
+ 
+diff --git a/runner/runner.go b/runner/runner.go
+index 82df4fa..0c05cfd 100644
+--- a/runner/runner.go
++++ b/runner/runner.go
+@@ -33,10 +33,10 @@ import (
+ 	"github.com/mfonda/simhash"
+ 	asnmap "github.com/projectdiscovery/asnmap/libs"
+ 	"github.com/projectdiscovery/fastdialer/fastdialer"
+-	"github.com/projectdiscovery/httpx/common/customextract"
+-	"github.com/projectdiscovery/httpx/common/hashes/jarm"
+-	"github.com/projectdiscovery/httpx/common/pagetypeclassifier"
+-	"github.com/projectdiscovery/httpx/static"
++	"github.com/pelamx/httpxCustom/common/customextract"
++	"github.com/pelamx/httpxCustom/common/hashes/jarm"
++	"github.com/pelamx/httpxCustom/common/pagetypeclassifier"
++	"github.com/pelamx/httpxCustom/static"
+ 	"github.com/projectdiscovery/mapcidr/asn"
+ 	"github.com/projectdiscovery/networkpolicy"
+ 	osutil "github.com/projectdiscovery/utils/os"
+@@ -48,7 +48,7 @@ import (
+ 
+ 	"github.com/projectdiscovery/clistats"
+ 	"github.com/projectdiscovery/goconfig"
+-	"github.com/projectdiscovery/httpx/common/hashes"
++	"github.com/pelamx/httpxCustom/common/hashes"
+ 	"github.com/projectdiscovery/retryablehttp-go"
+ 	sliceutil "github.com/projectdiscovery/utils/slice"
+ 	stringsutil "github.com/projectdiscovery/utils/strings"
+@@ -60,11 +60,11 @@ import (
+ 	_ "github.com/projectdiscovery/fdmax/autofdmax"
+ 	"github.com/projectdiscovery/gologger"
+ 	"github.com/projectdiscovery/hmap/store/hybrid"
+-	customport "github.com/projectdiscovery/httpx/common/customports"
+-	fileutilz "github.com/projectdiscovery/httpx/common/fileutil"
+-	"github.com/projectdiscovery/httpx/common/httputilz"
+-	"github.com/projectdiscovery/httpx/common/httpx"
+-	"github.com/projectdiscovery/httpx/common/stringz"
++	customport "github.com/pelamx/httpxCustom/common/customports"
++	fileutilz "github.com/pelamx/httpxCustom/common/fileutil"
++	"github.com/pelamx/httpxCustom/common/httputilz"
++	"github.com/pelamx/httpxCustom/common/httpx"
++	"github.com/pelamx/httpxCustom/common/stringz"
+ 	"github.com/projectdiscovery/mapcidr"
+ 	"github.com/projectdiscovery/rawhttp"
+ 	converstionutil "github.com/projectdiscovery/utils/conversion"
+@@ -1298,6 +1298,13 @@ func (r *Runner) RunEnumeration() {
+ 			}
+ 		}
+ 
++		if r.options.Endpoint != "" {
++			scanopts := r.scanopts.Clone()
++			scanopts.RequestURI = path.Join(scanopts.RequestURI, r.options.Endpoint)
++			r.process(k, wg, r.hp, protocol, scanopts, output)
++			return nil
++		}
++
+ 		if len(r.options.requestURIs) > 0 {
+ 			for _, p := range r.options.requestURIs {
+ 				scanopts := r.scanopts.Clone()
+diff --git a/runner/runner_test.go b/runner/runner_test.go
+index 850566b..ab8ddf5 100644
+--- a/runner/runner_test.go
++++ b/runner/runner_test.go
+@@ -8,7 +8,7 @@ import (
+ 	"time"
+ 
+ 	_ "github.com/projectdiscovery/fdmax/autofdmax"
+-	"github.com/projectdiscovery/httpx/common/httpx"
++	"github.com/pelamx/httpxCustom/common/httpx"
+ 	"github.com/projectdiscovery/mapcidr/asn"
+ 	stringsutil "github.com/projectdiscovery/utils/strings"
+ 	"github.com/stretchr/testify/require"
+diff --git a/runner/types.go b/runner/types.go
+index eb84561..7ca1235 100644
+--- a/runner/types.go
++++ b/runner/types.go
+@@ -17,7 +17,7 @@ import (
+ 	mapsutil "github.com/projectdiscovery/utils/maps"
+ 	wappalyzer "github.com/projectdiscovery/wappalyzergo"
+ 
+-	"github.com/projectdiscovery/httpx/common/httpx"
++	"github.com/pelamx/httpxCustom/common/httpx"
+ )
+ 
+ type AsnResponse struct {

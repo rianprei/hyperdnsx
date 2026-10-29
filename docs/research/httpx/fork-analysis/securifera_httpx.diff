@@ -1,0 +1,70 @@
+diff --git a/runner/cpe.go b/runner/cpe.go
+index 76444fa..9c4f719 100644
+--- a/runner/cpe.go
++++ b/runner/cpe.go
+@@ -178,6 +178,23 @@ func appendUnique(slice []CPEInfo, info CPEInfo) []CPEInfo {
+ 	return append(slice, info)
+ }
+ 
++// techCPEWithVersion takes a CPE string from wappalyzergo's fingerprint database
++// (which uses '*' as the version field) and, when a concrete version has been
++// detected, substitutes it into the version component of the CPE 2.3 string.
++// CPE 2.3 format: cpe:2.3:part:vendor:product:VERSION:update:edition:...
++func techCPEWithVersion(cpeStr, version string) string {
++	if version == "" {
++		return cpeStr
++	}
++	parts := strings.Split(cpeStr, ":")
++	// Minimum well-formed CPE 2.3 has at least 6 colon-separated components.
++	if len(parts) >= 6 {
++		parts[5] = strings.ToLower(strings.ReplaceAll(version, " ", "_"))
++		return strings.Join(parts, ":")
++	}
++	return cpeStr
++}
++
+ func (d *CPEDetector) Detect(title, body, faviconHash string) []CPEInfo {
+ 	seen := make(map[string]bool)
+ 	var results []CPEInfo
+diff --git a/runner/runner.go b/runner/runner.go
+index 6043b5f..6f2f990 100644
+--- a/runner/runner.go
++++ b/runner/runner.go
+@@ -2601,6 +2601,37 @@ retry:
+ 		}
+ 	}
+ 
++        // Augment CPE results with entries derived from wappalyzer-detected
++        // technologies. AppInfo already carries the CPE from the fingerprint
++        // database; if a version was detected (tech entry format "Name:version")
++        // substitute it into the CPE version field instead of the wildcard.
++        {
++                seenCPEs := make(map[string]bool)
++                for _, c := range cpeMatches {
++                        seenCPEs[c.CPE] = true
++                }
++                for techEntry, appInfo := range technologyDetails {
++                        if appInfo.CPE == "" {
++                                continue
++                        }
++                        version := ""
++                        appName := techEntry
++                        if idx := strings.Index(techEntry, ":"); idx >= 0 {
++                                appName = techEntry[:idx]
++                                version = techEntry[idx+1:]
++                        }
++                        cpeStr := techCPEWithVersion(appInfo.CPE, version)
++                        if seenCPEs[cpeStr] {
++                                continue
++                        }
++                        seenCPEs[cpeStr] = true
++                        cpeMatches = append(cpeMatches, CPEInfo{
++                                Product: appName,
++                                CPE:     cpeStr,
++                        })
++                }
++        }
++
+ 	var wpInfo *WordPressInfo
+ 	if r.wpDetector != nil {
+ 		wpInfo = r.wpDetector.Detect(string(resp.Data))

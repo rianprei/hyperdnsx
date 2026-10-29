@@ -122,6 +122,22 @@ echo "scope.example.com" > scope.txt
   per-resolver rate limit (`-resolver-rate-limit`).
 - Importable Go library (`libs/dnsx`).
 
+## Deep-research (`hyperx`)
+
+`hyperx` is a second binary that fuses the DNS engine with the
+[`httpx`](https://github.com/projectdiscovery/httpx) HTTP probing engine into a
+single pass: raw targets → resolved addresses → fingerprinted HTTP endpoints,
+emitted as one unified JSONL record (DNS provenance + HTTP fingerprint + TLS).
+The pure-DNS `dnsx` binary is unchanged.
+
+```bash
+make build-hyperx
+cat domains.txt | ./hyperx -tls-grab -json -silent
+```
+
+See [`docs/deep-research.md`](docs/deep-research.md) for flags, the unified
+record schema, the architecture, and the httpx fork-feature integration roadmap.
+
 ## Research documents
 
 | Document | Contents |
@@ -135,6 +151,9 @@ echo "scope.example.com" > scope.txt
 | `docs/research/benchmark-results.md` | Reproducible benchmarks (local fixtures only) |
 | `docs/research/dependency-audit.md` | Dependencies, licenses, tool availability |
 | `docs/termux-android.md` | Native Termux/ARM64 build & execution evidence |
+| `docs/deep-research.md` | `hyperx` deep-research pipeline + fork integration roadmap |
+| `docs/research/httpx/fork-audit-summary.md` | httpx fork audit (1262 forks) summary |
+| `docs/research/httpx/fork-feature-matrix.md` | httpx fork functional deltas, adopted / planned |
 
 ## License
 

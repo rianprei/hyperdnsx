@@ -1,0 +1,318 @@
+diff --git a/common/httpx/cdn.go b/common/httpx/cdn.go
+index c377c68..d6f0c44 100644
+--- a/common/httpx/cdn.go
++++ b/common/httpx/cdn.go
+@@ -19,3 +19,18 @@ func (h *HTTPX) CdnCheck(ip string) (bool, string, string, error) {
+ 	}
+ 	return matched, value, itemType, err
+ }
++
++// CdnCheckDomain verifies if the given domain is part of CDN/WAF ranges.
++func (h *HTTPX) CdnCheckDomain(domain string) (bool, string, string, error) {
++	if h.cdn == nil {
++		return false, "", "", fmt.Errorf("cdn client not configured")
++	}
++
++	// the goal is to check if domain resolves to cdn/waf to decide if target should be scanned or not
++	// since 'cloud' itemtype does not fit logic here, we consider target is not part of cdn/waf
++	matched, value, itemType, err := h.cdn.CheckDomainWithFallback(domain)
++	if itemType == "cloud" {
++		return false, value, itemType, err
++	}
++	return matched, value, itemType, err
++}
+diff --git a/common/httpx/httpx_test.go b/common/httpx/httpx_test.go
+index 9131e3b..0625804 100644
+--- a/common/httpx/httpx_test.go
++++ b/common/httpx/httpx_test.go
+@@ -47,3 +47,13 @@ func TestDefaultProtocolKeepsRetryableHTTP2FallbackClient(t *testing.T) {
+ 	require.NotNil(t, ht.client)
+ 	require.NotSame(t, ht.client.HTTPClient, ht.client.HTTPClient2)
+ }
++
++func TestCdnCheckDomainWithoutClient(t *testing.T) {
++	ht := &HTTPX{}
++
++	matched, value, itemType, err := ht.CdnCheckDomain("example.com")
++	require.Error(t, err)
++	require.False(t, matched)
++	require.Empty(t, value)
++	require.Empty(t, itemType)
++}
+diff --git a/runner/runner.go b/runner/runner.go
+index d015066..08949ee 100644
+--- a/runner/runner.go
++++ b/runner/runner.go
+@@ -30,14 +30,14 @@ import (
+ 	"github.com/PuerkitoBio/goquery"
+ 	"github.com/corona10/goimagehash"
+ 	"github.com/gocarina/gocsv"
++	"github.com/happyhackingspace/dit"
+ 	"github.com/mfonda/simhash"
+ 	asnmap "github.com/projectdiscovery/asnmap/libs"
+ 	"github.com/projectdiscovery/fastdialer/fastdialer"
++	"github.com/projectdiscovery/httpx/common/authprovider"
+ 	"github.com/projectdiscovery/httpx/common/customextract"
+ 	"github.com/projectdiscovery/httpx/common/hashes/jarm"
+ 	"github.com/projectdiscovery/httpx/common/inputformats"
+-	"github.com/happyhackingspace/dit"
+-	"github.com/projectdiscovery/httpx/common/authprovider"
+ 	"github.com/projectdiscovery/httpx/static"
+ 	"github.com/projectdiscovery/mapcidr/asn"
+ 	"github.com/projectdiscovery/networkpolicy"
+@@ -80,25 +80,25 @@ import (
+ 
+ // Runner is a client for running the enumeration process.
+ type Runner struct {
+-	seenMux sync.Mutex
+-	options            *Options
+-	hp                 *httpx.HTTPX
+-	wappalyzer         *wappalyzer.Wappalyze
+-	cpeDetector        *CPEDetector
+-	wpDetector         *WordPressDetector
+-	scanopts           ScanOptions
+-	hm                 *hybrid.HybridMap
+-	excludeCdn         bool
+-	stats              clistats.StatisticsClient
+-	ratelimiter        ratelimit.Limiter
+-	HostErrorsCache    gcache.Cache[string, int]
+-	browser            *Browser
+-	ditClassifier *dit.Classifier
+-	pHashClusters      []pHashCluster
+-	simHashes          gcache.Cache[uint64, []string]
+-	httpApiEndpoint    *Server
+-	authProvider       authprovider.AuthProvider
+-	interruptCh        chan struct{}
++	seenMux         sync.Mutex
++	options         *Options
++	hp              *httpx.HTTPX
++	wappalyzer      *wappalyzer.Wappalyze
++	cpeDetector     *CPEDetector
++	wpDetector      *WordPressDetector
++	scanopts        ScanOptions
++	hm              *hybrid.HybridMap
++	excludeCdn      bool
++	stats           clistats.StatisticsClient
++	ratelimiter     ratelimit.Limiter
++	HostErrorsCache gcache.Cache[string, int]
++	browser         *Browser
++	ditClassifier   *dit.Classifier
++	pHashClusters   []pHashCluster
++	simHashes       gcache.Cache[uint64, []string]
++	httpApiEndpoint *Server
++	authProvider    authprovider.AuthProvider
++	interruptCh     chan struct{}
+ }
+ 
+ func (r *Runner) HTTPX() *httpx.HTTPX {
+@@ -1817,8 +1817,27 @@ func (r *Runner) targets(hp *httpx.HTTPX, target string) chan httpx.Target {
+ 				results <- httpx.Target{Host: target, CustomIP: ip}
+ 			}
+ 		case !stringsutil.HasPrefixAny(target, "http://", "https://") && stringsutil.ContainsAny(target, ","):
+-			idxComma := strings.Index(target, ",")
+-			results <- httpx.Target{Host: target[idxComma+1:], CustomHost: target[:idxComma]}
++			parts := strings.Split(target, ",")
++
++			switch len(parts) {
++			case 2:
++				firstPart := strings.TrimSpace(parts[0])
++				host := strings.TrimSpace(parts[1])
++
++				if iputil.IsIP(firstPart) {
++					results <- httpx.Target{Host: host, CustomIP: firstPart}
++				} else {
++					results <- httpx.Target{Host: host, CustomHost: firstPart}
++				}
++			case 3:
++				results <- httpx.Target{
++					CustomIP:   strings.TrimSpace(parts[0]),
++					CustomHost: strings.TrimSpace(parts[1]),
++					Host:       strings.TrimSpace(parts[2]),
++				}
++			default:
++				results <- httpx.Target{Host: target}
++			}
+ 		default:
+ 			results <- httpx.Target{Host: target}
+ 		}
+@@ -2300,7 +2319,17 @@ retry:
+ 		_, _ = fmt.Fprintf(builder, " [%s]", cnames[0])
+ 	}
+ 
+-	isCDN, cdnName, cdnType, err := hp.CdnCheck(ip)
++	var (
++		isCDN   bool
++		cdnName string
++		cdnType string
++	)
++	if onlyHost != "" && !iputil.IsIP(onlyHost) {
++		isCDN, cdnName, cdnType, err = hp.CdnCheckDomain(onlyHost)
++	}
++	if !isCDN {
++		isCDN, cdnName, cdnType, err = hp.CdnCheck(ip)
++	}
+ 	if scanopts.OutputCDN == "true" && isCDN && err == nil {
+ 		_, _ = fmt.Fprintf(builder, " [%s]", cdnName)
+ 	}
+@@ -2633,60 +2662,60 @@ retry:
+ 	}
+ 
+ 	result := Result{
+-		Timestamp:        time.Now(),
+-		Request:          request,
+-		LinkRequest:      linkRequest,
+-		ResponseHeaders:  responseHeaders,
+-		RawHeaders:       rawResponseHeaders,
+-		Scheme:           parsed.Scheme,
+-		Port:             finalPort,
+-		Path:             finalPath,
+-		Raw:              resp.Raw,
+-		URL:              fullURL,
+-		Input:            origInput,
+-		ContentLength:    resp.ContentLength,
+-		ChainStatusCodes: chainStatusCodes,
+-		Chain:            chainItems,
+-		StatusCode:       resp.StatusCode,
+-		Location:         resp.GetHeaderPart("Location", ";"),
+-		ContentType:      resp.GetHeaderPart("Content-Type", ";"),
+-		Title:            title,
+-		str:              builder.String(),
+-		VHost:            isvhost,
+-		WebServer:        serverHeader,
+-		ResponseBody:     serverResponseRaw,
+-		BodyPreview:      bodyPreview,
+-		WebSocket:        isWebSocket,
+-		TLSData:          resp.TLSData,
+-		CSPData:          resp.CSPData,
+-		Pipeline:         pipeline,
+-		HTTP2:            http2,
+-		Method:           method,
+-		Host:             parsed.Hostname(),
+-		HostIP:           ip,
+-		A:                ips4,
+-		AAAA:             ips6,
+-		CNAMEs:           cnames,
+-		CDN:              isCDN,
+-		CDNName:          cdnName,
+-		CDNType:          cdnType,
+-		ResponseTime:     resp.Duration.String(),
+-		Technologies:     technologies,
+-		FinalURL:         finalURL,
+-		FavIconMMH3:      faviconMMH3,
+-		FavIconMD5:       faviconMD5,
+-		FaviconPath:      faviconPath,
+-		FaviconURL:       faviconURL,
+-		Hashes:           hashesMap,
+-		Extracts:         extractResult,
+-		JarmHash:         jarmhash,
+-		Lines:            resp.Lines,
+-		Words:            resp.Words,
+-		ASN:              asnResponse,
+-		ExtractRegex:     extractRegex,
+-		ScreenshotBytes:  screenshotBytes,
+-		HeadlessBody:     headlessBody,
+-		KnowledgeBase: r.classifyPage(headlessBody, respData, pHash),
++		Timestamp:         time.Now(),
++		Request:           request,
++		LinkRequest:       linkRequest,
++		ResponseHeaders:   responseHeaders,
++		RawHeaders:        rawResponseHeaders,
++		Scheme:            parsed.Scheme,
++		Port:              finalPort,
++		Path:              finalPath,
++		Raw:               resp.Raw,
++		URL:               fullURL,
++		Input:             origInput,
++		ContentLength:     resp.ContentLength,
++		ChainStatusCodes:  chainStatusCodes,
++		Chain:             chainItems,
++		StatusCode:        resp.StatusCode,
++		Location:          resp.GetHeaderPart("Location", ";"),
++		ContentType:       resp.GetHeaderPart("Content-Type", ";"),
++		Title:             title,
++		str:               builder.String(),
++		VHost:             isvhost,
++		WebServer:         serverHeader,
++		ResponseBody:      serverResponseRaw,
++		BodyPreview:       bodyPreview,
++		WebSocket:         isWebSocket,
++		TLSData:           resp.TLSData,
++		CSPData:           resp.CSPData,
++		Pipeline:          pipeline,
++		HTTP2:             http2,
++		Method:            method,
++		Host:              parsed.Hostname(),
++		HostIP:            ip,
++		A:                 ips4,
++		AAAA:              ips6,
++		CNAMEs:            cnames,
++		CDN:               isCDN,
++		CDNName:           cdnName,
++		CDNType:           cdnType,
++		ResponseTime:      resp.Duration.String(),
++		Technologies:      technologies,
++		FinalURL:          finalURL,
++		FavIconMMH3:       faviconMMH3,
++		FavIconMD5:        faviconMD5,
++		FaviconPath:       faviconPath,
++		FaviconURL:        faviconURL,
++		Hashes:            hashesMap,
++		Extracts:          extractResult,
++		JarmHash:          jarmhash,
++		Lines:             resp.Lines,
++		Words:             resp.Words,
++		ASN:               asnResponse,
++		ExtractRegex:      extractRegex,
++		ScreenshotBytes:   screenshotBytes,
++		HeadlessBody:      headlessBody,
++		KnowledgeBase:     r.classifyPage(headlessBody, respData, pHash),
+ 		TechnologyDetails: technologyDetails,
+ 		Resolvers:         resolvers,
+ 		RequestRaw:        requestDump,
+diff --git a/runner/runner_test.go b/runner/runner_test.go
+index 415a6f5..da1de84 100644
+--- a/runner/runner_test.go
++++ b/runner/runner_test.go
+@@ -106,6 +106,42 @@ func TestRunner_domain_targets(t *testing.T) {
+ 	require.ElementsMatch(t, expected, got, "could not expected output")
+ }
+ 
++func TestRunner_commaSeparated_targets_supportCustomIP(t *testing.T) {
++	options := &Options{}
++	r, err := New(options)
++	require.Nil(t, err, "could not create httpx runner")
++
++	input := []string{
++		"1.1.1.1,one.one.one.one",
++		"1.1.1.1,example.com,one.one.one.one",
++		"example.com,one.one.one.one",
++	}
++	expected := []httpx.Target{
++		{
++			Host:     "one.one.one.one",
++			CustomIP: "1.1.1.1",
++		},
++		{
++			Host:       "one.one.one.one",
++			CustomIP:   "1.1.1.1",
++			CustomHost: "example.com",
++		},
++		{
++			Host:       "one.one.one.one",
++			CustomHost: "example.com",
++		},
++	}
++
++	got := []httpx.Target{}
++	for _, inp := range input {
++		for target := range r.targets(r.hp, inp) {
++			got = append(got, target)
++		}
++	}
++
++	require.ElementsMatch(t, expected, got, "could not expected output")
++}
++
+ func TestRunner_probeall_targets(t *testing.T) {
+ 	options := &Options{
+ 		ProbeAllIPS: true,

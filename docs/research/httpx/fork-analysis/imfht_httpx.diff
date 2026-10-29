@@ -1,0 +1,167 @@
+diff --git a/README.md b/README.md
+index 89ab22c..64f3c24 100644
+--- a/README.md
++++ b/README.md
+@@ -110,8 +110,9 @@ PROBES:
+    -probe                display probe status
+ 
+ HEADLESS:
+-   -ss, -screenshot  enable saving screenshot of the page using headless browser
+-   -system-chrome    enable using local installed chrome for screenshot
++   -ss, -screenshot            enable saving screenshot of the page using headless browser
++   -ssf, -screenshot-fullpage  enable saving screenshot for full page (default false)
++   -system-chrome              enable using local installed chrome for screenshot
+ 
+ MATCHERS:
+    -mc, -match-code string            match response with specified status code (-mc 200,302)
+@@ -121,7 +122,7 @@ MATCHERS:
+    -mfc, -match-favicon string[]      match response with specified favicon hash (-mfc 1494302000)
+    -ms, -match-string string          match response with specified string (-ms admin)
+    -mr, -match-regex string           match response with specified regex (-mr admin)
+-   -mcdn, -match-cdn string[]         match host with specified cdn provider (incapsula, oracle, google, azure, cloudflare, cloudfront, fastly, akamai, sucuri, leaseweb)
++   -mcdn, -match-cdn string[]         match host with specified cdn provider (cloudfront, fastly, google, leaseweb)
+    -mrt, -match-response-time string  match response with specified response time in seconds (-mrt '< 1')
+    -mdc, -match-condition string      match response with dsl expression condition
+ 
+@@ -137,7 +138,7 @@ FILTERS:
+    -ffc, -filter-favicon string[]      filter response with specified favicon hash (-mfc 1494302000)
+    -fs, -filter-string string          filter response with specified string (-fs admin)
+    -fe, -filter-regex string           filter response with specified regex (-fe admin)
+-   -fcdn, -filter-cdn string[]         filter host with specified cdn provider (incapsula, oracle, google, azure, cloudflare, cloudfront, fastly, akamai, sucuri, leaseweb)
++   -fcdn, -filter-cdn string[]         filter host with specified cdn provider (cloudfront, fastly, google, leaseweb)
+    -frt, -filter-response-time string  filter response with specified response time in seconds (-frt '> 1')
+    -fdc, -filter-condition string      filter response with dsl expression condition
+ 
+@@ -169,7 +170,8 @@ OUTPUT:
+    -csv                                store output in csv format
+    -csvo, -csv-output-encoding string  define output encoding
+    -json                               store output in JSONL(ines) format
+-   -irr, -include-response             include http request/response in JSON output (-json only)
++   -irr, -include-response             include http response in JSON output (-json only)
++   -irreq, -include-request            include http request in JSON output (-json only)
+    -irrb, -include-response-base64     include base64 encoded http request/response in JSON output (-json only)
+    -include-chain                      include redirect http chain in JSON output (-json only)
+    -store-chain                        include http redirect chain in responses (-sr only)
+@@ -215,7 +217,7 @@ OPTIMIZATIONS:
+    -maxhr, -max-host-error int        max error count per host before skipping remaining path/s (default 30)
+    -ec, -exclude-cdn                  skip full port scans for CDNs (only checks for 80,443)
+    -retries int                       number of retries
+-   -timeout int                       timeout in seconds (default 5)
++   -timeout int                       timeout in seconds (default 10)
+    -delay duration                    duration between each http request (eg: 200ms, 1s) (default -1ns)
+    -rsts, -response-size-to-save int  max response size to save in bytes (default 2147483647)
+    -rstr, -response-size-to-read int  max response size to read in bytes (default 2147483647)
+diff --git a/runner/headless.go b/runner/headless.go
+index cdf082e..9822f2d 100644
+--- a/runner/headless.go
++++ b/runner/headless.go
+@@ -90,7 +90,7 @@ func NewBrowser(proxy string, useLocal bool) (*Browser, error) {
+ 	return engine, nil
+ }
+ 
+-func (b *Browser) ScreenshotWithBody(url string, timeout time.Duration) ([]byte, string, error) {
++func (b *Browser) ScreenshotWithBody(url string, timeout time.Duration, fullPage bool) ([]byte, string, error) {
+ 	page, err := b.engine.Page(proto.TargetCreateTarget{})
+ 	if err != nil {
+ 		return nil, "", err
+@@ -109,7 +109,8 @@ func (b *Browser) ScreenshotWithBody(url string, timeout time.Duration) ([]byte,
+ 	}
+ 	_ = page.WaitIdle(1 * time.Second)
+ 
+-	screenshot, err := page.Screenshot(true, &proto.PageCaptureScreenshot{})
++	screenshot, err := page.Screenshot(fullPage, &proto.PageCaptureScreenshot{})
++
+ 	if err != nil {
+ 		return nil, "", err
+ 	}
+diff --git a/runner/options.go b/runner/options.go
+index 6ac0cd9..aefb87f 100644
+--- a/runner/options.go
++++ b/runner/options.go
+@@ -53,6 +53,7 @@ type ScanOptions struct {
+ 	OutputWithNoColor         bool
+ 	OutputMethod              bool
+ 	ResponseInStdout          bool
++	RequestInStdout           bool
+ 	Base64ResponseInStdout    bool
+ 	ChainInStdout             bool
+ 	TLSProbe                  bool
+@@ -84,6 +85,7 @@ type ScanOptions struct {
+ 	OutputWordsCount          bool
+ 	Hashes                    string
+ 	Screenshot                bool
++	ScreenshotFullPage        bool
+ 	UseInstalledChrome        bool
+ }
+ 
+@@ -132,6 +134,7 @@ func (s *ScanOptions) Clone() *ScanOptions {
+ 		OutputWordsCount:          s.OutputWordsCount,
+ 		Hashes:                    s.Hashes,
+ 		Screenshot:                s.Screenshot,
++		ScreenshotFullPage:        s.ScreenshotFullPage,
+ 		UseInstalledChrome:        s.UseInstalledChrome,
+ 	}
+ }
+@@ -190,6 +193,7 @@ type Options struct {
+ 	OutputServerHeader        bool
+ 	OutputWebSocket           bool
+ 	responseInStdout          bool
++	requestInStdout           bool
+ 	base64responseInStdout    bool
+ 	chainInStdout             bool
+ 	FollowHostRedirects       bool
+@@ -266,6 +270,7 @@ type Options struct {
+ 	DisableUpdateCheck        bool
+ 	NoDecode                  bool
+ 	Screenshot                bool
++	ScreenshotFullPage        bool
+ 	UseInstalledChrome        bool
+ }
+ 
+@@ -307,6 +312,7 @@ func ParseOptions() *Options {
+ 
+ 	flagSet.CreateGroup("headless", "Headless",
+ 		flagSet.BoolVarP(&options.Screenshot, "screenshot", "ss", false, "enable saving screenshot of the page using headless browser"),
++		flagSet.BoolVarP(&options.ScreenshotFullPage, "screenshot-fullpage", "ssf", false, "enable saving screenshot for full page"),
+ 		flagSet.BoolVar(&options.UseInstalledChrome, "system-chrome", false, "enable using local installed chrome for screenshot"),
+ 	)
+ 
+@@ -372,7 +378,8 @@ func ParseOptions() *Options {
+ 		flagSet.BoolVar(&options.CSVOutput, "csv", false, "store output in csv format"),
+ 		flagSet.StringVarP(&options.CSVOutputEncoding, "csv-output-encoding", "csvo", "", "define output encoding"),
+ 		flagSet.BoolVar(&options.JSONOutput, "json", false, "store output in JSONL(ines) format"),
+-		flagSet.BoolVarP(&options.responseInStdout, "include-response", "irr", false, "include http request/response in JSON output (-json only)"),
++		flagSet.BoolVarP(&options.responseInStdout, "include-response", "irr", false, "include http response in JSON output (-json only)"),
++		flagSet.BoolVarP(&options.requestInStdout, "include-request", "irreq", false, "include http request in JSON output (-json only)"),
+ 		flagSet.BoolVarP(&options.base64responseInStdout, "include-response-base64", "irrb", false, "include base64 encoded http request/response in JSON output (-json only)"),
+ 		flagSet.BoolVar(&options.chainInStdout, "include-chain", false, "include redirect http chain in JSON output (-json only)"),
+ 		flagSet.BoolVar(&options.StoreChain, "store-chain", false, "include http redirect chain in responses (-sr only)"),
+diff --git a/runner/runner.go b/runner/runner.go
+index 23a1b93..74146c7 100644
+--- a/runner/runner.go
++++ b/runner/runner.go
+@@ -218,6 +218,7 @@ func New(options *Options) (*Runner, error) {
+ 	scanopts.OutputServerHeader = options.OutputServerHeader
+ 	scanopts.OutputWithNoColor = options.NoColor
+ 	scanopts.ResponseInStdout = options.responseInStdout
++	scanopts.RequestInStdout = options.requestInStdout
+ 	scanopts.Base64ResponseInStdout = options.base64responseInStdout
+ 	scanopts.ChainInStdout = options.chainInStdout
+ 	scanopts.OutputWebSocket = options.OutputWebSocket
+@@ -252,6 +253,7 @@ func New(options *Options) (*Runner, error) {
+ 		runner.browser = browser
+ 	}
+ 	scanopts.Screenshot = options.Screenshot
++	scanopts.ScreenshotFullPage = options.ScreenshotFullPage
+ 	scanopts.UseInstalledChrome = options.UseInstalledChrome
+ 
+ 	if options.OutputExtractRegexs != nil {
+@@ -1691,7 +1693,7 @@ retry:
+ 	if scanopts.Screenshot {
+ 		screenshotPath = fileutilz.AbsPathOrDefault(filepath.Join(screenshotBaseDir, screenshotResponseFile))
+ 		var err error
+-		screenshotBytes, headlessBody, err = r.browser.ScreenshotWithBody(fullURL, r.hp.Options.Timeout)
++		screenshotBytes, headlessBody, err = r.browser.ScreenshotWithBody(fullURL, r.hp.Options.Timeout, scanopts.ScreenshotFullPage)
+ 		if err != nil {
+ 			gologger.Warning().Msgf("Could not take screenshot '%s': %s", fullURL, err)
+ 		} else {

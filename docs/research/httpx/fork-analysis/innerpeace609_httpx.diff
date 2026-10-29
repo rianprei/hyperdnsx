@@ -1,0 +1,12 @@
+diff --git a/common/httpx/httpx.go b/common/httpx/httpx.go
+index 039f4c4..c86c8b2 100644
+--- a/common/httpx/httpx.go
++++ b/common/httpx/httpx.go
+@@ -157,6 +157,7 @@ func New(options *Options) (*HTTPX, error) {
+ 		// disable http2
+ 		_ = os.Setenv("GODEBUG", "http2client=0")
+ 		transport.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}
++		transport.ForceAttemptHTTP2 = false
+ 	}
+ 
+ 	if httpx.Options.SniName != "" {

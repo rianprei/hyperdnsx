@@ -1,0 +1,194 @@
+diff --git a/runner/options.go b/runner/options.go
+index c09944d..20400fb 100644
+--- a/runner/options.go
++++ b/runner/options.go
+@@ -271,6 +271,7 @@ type Options struct {
+ 	Stream                    bool
+ 	SkipDedupe                bool
+ 	ProbeAllIPS               bool
++	CustomHosts               goflags.StringSlice
+ 	Resolvers                 goflags.StringSlice
+ 	Favicon                   bool
+ 	OutputFilterFavicon       goflags.StringSlice
+@@ -482,6 +483,7 @@ func ParseOptions() *Options {
+ 		flagSet.BoolVarP(&options.FollowHostRedirects, "follow-host-redirects", "fhr", false, "follow redirects on the same host"),
+ 		flagSet.BoolVarP(&options.RespectHSTS, "respect-hsts", "rhsts", false, "respect HSTS response headers for redirect requests"),
+ 		flagSet.BoolVar(&options.VHostInput, "vhost-input", false, "get a list of vhosts as input"),
++		flagSet.StringSliceVarP(&options.CustomHosts, "custom-hosts", "ch", nil, "try a list of names in the Host header for every target IP", goflags.NormalizedStringSliceOptions),
+ 		flagSet.StringVar(&options.Methods, "x", "", "request methods to probe, use 'all' to probe all HTTP methods"),
+ 		flagSet.StringVar(&options.RequestBody, "body", "", "post body to include in http request"),
+ 		flagSet.BoolVarP(&options.Stream, "stream", "s", false, "stream mode - start elaborating input targets without sorting"),
+diff --git a/runner/runner.go b/runner/runner.go
+index 4b80615..ad4555d 100644
+--- a/runner/runner.go
++++ b/runner/runner.go
+@@ -1057,7 +1057,7 @@ func (r *Runner) RunEnumeration() {
+ 
+ 			// store responses or chain in directory
+ 			URL, _ := urlutil.Parse(resp.URL)
+-			domainFile := resp.Method + ":" + URL.EscapedString()
++			domainFile := resp.Method + ":" + URL.EscapedString() + ":" + resp.RequestHostHeader
+ 			hash := hashes.Sha1([]byte(domainFile))
+ 			domainResponseFile := fmt.Sprintf("%s.txt", hash)
+ 			screenshotResponseFile := fmt.Sprintf("%s.png", hash)
+@@ -1512,7 +1512,28 @@ func (r *Runner) targets(hp *httpx.HTTPX, target string) chan httpx.Target {
+ 			idxComma := strings.Index(target, ",")
+ 			results <- httpx.Target{Host: target[idxComma+1:], CustomHost: target[:idxComma]}
+ 		default:
+-			results <- httpx.Target{Host: target}
++			if len(r.options.CustomHosts) > 0 {
++				for _, customHost := range r.options.CustomHosts {
++					// maybe it's a file with a list of custom hosts?
++					if fileutil.FileExists(customHost) {
++						customHostsCh, err := fileutil.ReadFile(customHost)
++						if err != nil {
++							gologger.Error().Msgf("Could not read custom hosts from file '%s': %s\n", customHost, err)
++							continue
++						}
++
++						for customHost := range customHostsCh {
++							results <- httpx.Target{Host: target, CustomHost: customHost}
++						}
++
++						continue
++					}
++
++					results <- httpx.Target{Host: target, CustomHost: customHost}
++				}
++			} else {
++				results <- httpx.Target{Host: target}
++			}
+ 		}
+ 	}()
+ 	return results
+@@ -1827,6 +1848,8 @@ retry:
+ 		builder.WriteString(fmt.Sprintf(" [%s]", serverHeader))
+ 	}
+ 
++	requestHostHeader := req.Host
++
+ 	var (
+ 		serverResponseRaw  string
+ 		request            string
+@@ -2226,57 +2249,58 @@ retry:
+ 	}
+ 
+ 	result := Result{
+-		Timestamp:        time.Now(),
+-		Request:          request,
+-		ResponseHeaders:  responseHeaders,
+-		RawHeaders:       rawResponseHeaders,
+-		Scheme:           parsed.Scheme,
+-		Port:             finalPort,
+-		Path:             finalPath,
+-		Raw:              resp.Raw,
+-		URL:              fullURL,
+-		Input:            origInput,
+-		ContentLength:    resp.ContentLength,
+-		ChainStatusCodes: chainStatusCodes,
+-		Chain:            chainItems,
+-		StatusCode:       resp.StatusCode,
+-		Location:         resp.GetHeaderPart("Location", ";"),
+-		ContentType:      resp.GetHeaderPart("Content-Type", ";"),
+-		Title:            title,
+-		str:              builder.String(),
+-		VHost:            isvhost,
+-		WebServer:        serverHeader,
+-		ResponseBody:     serverResponseRaw,
+-		BodyPreview:      bodyPreview,
+-		WebSocket:        isWebSocket,
+-		TLSData:          resp.TLSData,
+-		CSPData:          resp.CSPData,
+-		Pipeline:         pipeline,
+-		HTTP2:            http2,
+-		Method:           method,
+-		Host:             ip,
+-		A:                ips4,
+-		AAAA:             ips6,
+-		CNAMEs:           cnames,
+-		CDN:              isCDN,
+-		CDNName:          cdnName,
+-		CDNType:          cdnType,
+-		ResponseTime:     resp.Duration.String(),
+-		Technologies:     technologies,
+-		FinalURL:         finalURL,
+-		FavIconMMH3:      faviconMMH3,
+-		FavIconMD5:       faviconMD5,
+-		FaviconPath:      faviconPath,
+-		FaviconURL:       faviconURL,
+-		Hashes:           hashesMap,
+-		Extracts:         extractResult,
+-		JarmHash:         jarmhash,
+-		Lines:            resp.Lines,
+-		Words:            resp.Words,
+-		ASN:              asnResponse,
+-		ExtractRegex:     extractRegex,
+-		ScreenshotBytes:  screenshotBytes,
+-		HeadlessBody:     headlessBody,
++		Timestamp:         time.Now(),
++		Request:           request,
++		ResponseHeaders:   responseHeaders,
++		RawHeaders:        rawResponseHeaders,
++		Scheme:            parsed.Scheme,
++		Port:              finalPort,
++		Path:              finalPath,
++		Raw:               resp.Raw,
++		URL:               fullURL,
++		Input:             origInput,
++		ContentLength:     resp.ContentLength,
++		ChainStatusCodes:  chainStatusCodes,
++		Chain:             chainItems,
++		StatusCode:        resp.StatusCode,
++		Location:          resp.GetHeaderPart("Location", ";"),
++		ContentType:       resp.GetHeaderPart("Content-Type", ";"),
++		Title:             title,
++		str:               builder.String(),
++		VHost:             isvhost,
++		WebServer:         serverHeader,
++		RequestHostHeader: requestHostHeader,
++		ResponseBody:      serverResponseRaw,
++		BodyPreview:       bodyPreview,
++		WebSocket:         isWebSocket,
++		TLSData:           resp.TLSData,
++		CSPData:           resp.CSPData,
++		Pipeline:          pipeline,
++		HTTP2:             http2,
++		Method:            method,
++		Host:              ip,
++		A:                 ips4,
++		AAAA:              ips6,
++		CNAMEs:            cnames,
++		CDN:               isCDN,
++		CDNName:           cdnName,
++		CDNType:           cdnType,
++		ResponseTime:      resp.Duration.String(),
++		Technologies:      technologies,
++		FinalURL:          finalURL,
++		FavIconMMH3:       faviconMMH3,
++		FavIconMD5:        faviconMD5,
++		FaviconPath:       faviconPath,
++		FaviconURL:        faviconURL,
++		Hashes:            hashesMap,
++		Extracts:          extractResult,
++		JarmHash:          jarmhash,
++		Lines:             resp.Lines,
++		Words:             resp.Words,
++		ASN:               asnResponse,
++		ExtractRegex:      extractRegex,
++		ScreenshotBytes:   screenshotBytes,
++		HeadlessBody:      headlessBody,
+ 		KnowledgeBase: map[string]interface{}{
+ 			"PageType": r.pageTypeClassifier.Classify(respData),
+ 			"pHash":    pHash,
+diff --git a/runner/types.go b/runner/types.go
+index 7bdb3a9..61d00f2 100644
+--- a/runner/types.go
++++ b/runner/types.go
+@@ -56,6 +56,7 @@ type Result struct {
+ 	ResponseBody       string                        `json:"body,omitempty" csv:"body" mapstructure:"body"`
+ 	BodyPreview        string                        `json:"body_preview,omitempty" csv:"body_preview" mapstructure:"body_preview"`
+ 	ContentType        string                        `json:"content_type,omitempty" csv:"content_type" mapstructure:"content_type"`
++	RequestHostHeader  string                        `json:"request_host_header,omitempty" csv:"request_host_header" mapstructure:"request_host_header"`
+ 	Method             string                        `json:"method,omitempty" csv:"method" mapstructure:"method"`
+ 	Host               string                        `json:"host,omitempty" csv:"host" mapstructure:"host"`
+ 	Path               string                        `json:"path,omitempty" csv:"path" mapstructure:"path"`

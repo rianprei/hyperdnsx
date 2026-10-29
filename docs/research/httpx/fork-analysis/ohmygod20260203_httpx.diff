@@ -1,0 +1,173 @@
+diff --git a/runner/resume.go b/runner/resume.go
+index ce2d375..9edc76a 100644
+--- a/runner/resume.go
++++ b/runner/resume.go
+@@ -1,8 +1,13 @@
+ package runner
+ 
++import "sync"
++
+ type ResumeCfg struct {
+-	ResumeFrom   string
+-	Index        int
+-	current      string
+-	currentIndex int
++	ResumeFrom         string
++	Index              int
++	current            string
++	currentIndex       int
++	lastCompletedIndex int
++	lastCompletedItem  string
++	mu                 sync.Mutex
+ }
+diff --git a/runner/runner.go b/runner/runner.go
+index 14b9162..87ba604 100644
+--- a/runner/runner.go
++++ b/runner/runner.go
+@@ -1402,9 +1402,11 @@ func (r *Runner) RunEnumeration() {
+ 	wg, _ := syncutil.New(syncutil.WithSize(r.options.Threads))
+ 
+ 	processItem := func(k string) error {
++		var itemIndex int
+ 		if r.options.resumeCfg != nil {
+ 			r.options.resumeCfg.current = k
+ 			r.options.resumeCfg.currentIndex++
++			itemIndex = r.options.resumeCfg.currentIndex
+ 			if r.options.resumeCfg.currentIndex <= r.options.resumeCfg.Index {
+ 				return nil
+ 			}
+@@ -1418,16 +1420,22 @@ func (r *Runner) RunEnumeration() {
+ 			}
+ 		}
+ 
++		// Create per-item WaitGroup to track when this item's goroutines complete
++		var itemWg *sync.WaitGroup
++		if r.options.resumeCfg != nil {
++			itemWg = &sync.WaitGroup{}
++		}
++
+ 		runProcess := func(times int) {
+ 			for i := 0; i < times; i++ {
+ 				if len(r.options.requestURIs) > 0 {
+ 					for _, p := range r.options.requestURIs {
+ 						scanopts := r.scanopts.Clone()
+ 						scanopts.RequestURI = p
+-						r.process(k, wg, r.hp, protocol, scanopts, output)
++						r.process(k, wg, r.hp, protocol, scanopts, output, itemWg)
+ 					}
+ 				} else {
+-					r.process(k, wg, r.hp, protocol, &r.scanopts, output)
++					r.process(k, wg, r.hp, protocol, &r.scanopts, output, itemWg)
+ 				}
+ 			}
+ 		}
+@@ -1442,6 +1450,17 @@ func (r *Runner) RunEnumeration() {
+ 			runProcess(cnt)
+ 		}
+ 
++		// When all goroutines for this item complete, mark it as completed
++		if r.options.resumeCfg != nil && itemWg != nil {
++			go func(idx int, item string, wg *sync.WaitGroup) {
++				wg.Wait()
++				r.options.resumeCfg.mu.Lock()
++				r.options.resumeCfg.lastCompletedIndex = idx
++				r.options.resumeCfg.lastCompletedItem = item
++				r.options.resumeCfg.mu.Unlock()
++			}(itemIndex, k, itemWg)
++		}
++
+ 		return nil
+ 	}
+ 
+@@ -1549,10 +1568,10 @@ func (r *Runner) GetScanOpts() ScanOptions {
+ }
+ 
+ func (r *Runner) Process(t string, wg *syncutil.AdaptiveWaitGroup, protocol string, scanopts *ScanOptions, output chan Result) {
+-	r.process(t, wg, r.hp, protocol, scanopts, output)
++	r.process(t, wg, r.hp, protocol, scanopts, output, nil)
+ }
+ 
+-func (r *Runner) process(t string, wg *syncutil.AdaptiveWaitGroup, hp *httpx.HTTPX, protocol string, scanopts *ScanOptions, output chan Result) {
++func (r *Runner) process(t string, wg *syncutil.AdaptiveWaitGroup, hp *httpx.HTTPX, protocol string, scanopts *ScanOptions, output chan Result, itemWg *sync.WaitGroup) {
+ 	// attempts to set the workpool size to the number of threads
+ 	if r.options.Threads > 0 && wg.Size != r.options.Threads {
+ 		if err := wg.Resize(context.Background(), r.options.Threads); err != nil {
+@@ -1573,8 +1592,14 @@ func (r *Runner) process(t string, wg *syncutil.AdaptiveWaitGroup, hp *httpx.HTT
+ 					// sleep for delay time
+ 					time.Sleep(r.options.Delay)
+ 					wg.Add()
++					if itemWg != nil {
++						itemWg.Add(1)
++					}
+ 					go func(target httpx.Target, method, protocol string) {
+ 						defer wg.Done()
++						if itemWg != nil {
++							defer itemWg.Done()
++						}
+ 						result := r.analyze(hp, protocol, target, method, t, scanopts)
+ 						output <- result
+ 						if scanopts.TLSProbe && result.TLSData != nil {
+@@ -1582,10 +1607,11 @@ func (r *Runner) process(t string, wg *syncutil.AdaptiveWaitGroup, hp *httpx.HTT
+ 								if !r.testAndSet(tt) {
+ 									continue
+ 								}
+-								r.process(tt, wg, hp, protocol, scanopts, output)
++								// recursive calls don't track on itemWg (discovered targets are separate)
++								r.process(tt, wg, hp, protocol, scanopts, output, nil)
+ 							}
+ 							if r.testAndSet(result.TLSData.SubjectCN) {
+-								r.process(result.TLSData.SubjectCN, wg, hp, protocol, scanopts, output)
++								r.process(result.TLSData.SubjectCN, wg, hp, protocol, scanopts, output, nil)
+ 							}
+ 						}
+ 						if scanopts.CSPProbe && result.CSPData != nil {
+@@ -1596,7 +1622,7 @@ func (r *Runner) process(t string, wg *syncutil.AdaptiveWaitGroup, hp *httpx.HTT
+ 								if !r.testAndSet(tt) {
+ 									continue
+ 								}
+-								r.process(tt, wg, hp, protocol, scanopts, output)
++								r.process(tt, wg, hp, protocol, scanopts, output, nil)
+ 							}
+ 						}
+ 					}(target, method, prot)
+@@ -1621,8 +1647,14 @@ func (r *Runner) process(t string, wg *syncutil.AdaptiveWaitGroup, hp *httpx.HTT
+ 					// sleep for delay time
+ 					time.Sleep(r.options.Delay)
+ 					wg.Add()
++					if itemWg != nil {
++						itemWg.Add(1)
++					}
+ 					go func(port int, target httpx.Target, method, protocol string) {
+ 						defer wg.Done()
++						if itemWg != nil {
++							defer itemWg.Done()
++						}
+ 						if urlx, err := r.parseURL(target.Host); err != nil {
+ 							gologger.Warning().Msgf("failed to update port of %v got %v", target.Host, err)
+ 						} else {
+@@ -1636,10 +1668,10 @@ func (r *Runner) process(t string, wg *syncutil.AdaptiveWaitGroup, hp *httpx.HTT
+ 								if !r.testAndSet(tt) {
+ 									continue
+ 								}
+-								r.process(tt, wg, hp, protocol, scanopts, output)
++								r.process(tt, wg, hp, protocol, scanopts, output, nil)
+ 							}
+ 							if r.testAndSet(result.TLSData.SubjectCN) {
+-								r.process(result.TLSData.SubjectCN, wg, hp, protocol, scanopts, output)
++								r.process(result.TLSData.SubjectCN, wg, hp, protocol, scanopts, output, nil)
+ 							}
+ 						}
+ 					}(port, target, method, wantedProtocol)
+@@ -2793,8 +2825,10 @@ func extractPotentialFavIconsURLs(resp []byte) (candidates []string, baseHref st
+ // SaveResumeConfig to file
+ func (r *Runner) SaveResumeConfig() error {
+ 	var resumeCfg ResumeCfg
+-	resumeCfg.Index = r.options.resumeCfg.currentIndex
+-	resumeCfg.ResumeFrom = r.options.resumeCfg.current
++	r.options.resumeCfg.mu.Lock()
++	resumeCfg.Index = r.options.resumeCfg.lastCompletedIndex
++	resumeCfg.ResumeFrom = r.options.resumeCfg.lastCompletedItem
++	r.options.resumeCfg.mu.Unlock()
+ 	return goconfig.Save(resumeCfg, DefaultResumeFile)
+ }
+ 

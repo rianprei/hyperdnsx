@@ -1,0 +1,92 @@
+diff --git a/README.md b/README.md
+index 45ca52c..47c9323 100644
+--- a/README.md
++++ b/README.md
+@@ -145,6 +145,7 @@ This will display help for the tool. Here are all the switches it supports.
+ | match-string            | Filter results based on matched string                  | httpx -match-string XXX                            |
+ | filter-regex            | Filter results based on filtered regex                  | httpx -filter-regex XXX                            |
+ | match-regex             | Filter results based on matched regex                   | httpx -match-regex XXX                             |
++| custom-regex            | 使用自定义表达式匹配网页内容并输出(必须包含子表达式)              | httpx -custom-regex "(?im)(.*?)"                   |
+ 
+ 
+ ### Running httpx with stdin  
+diff --git a/common/httpx/customregex.go b/common/httpx/customregex.go
+new file mode 100644
+index 0000000..665d885
+--- /dev/null
++++ b/common/httpx/customregex.go
+@@ -0,0 +1,16 @@
++package httpx
++
++import (
++	"regexp"
++	"strings"
++)
++
++// ExtractInfo by custom regex from a response
++func ExtractInfoByCustomRegex(r *Response, regex string) (info string) {
++	var re = regexp.MustCompile(regex)
++	matchs := re.FindAllStringSubmatch(r.Raw, -1)
++	for _, match := range matchs {
++		info += strings.Join(match[1:], " | ")
++	}
++	return
++}
+diff --git a/internal/runner/options.go b/internal/runner/options.go
+index 6fe6858..d9941bf 100644
+--- a/internal/runner/options.go
++++ b/internal/runner/options.go
+@@ -22,6 +22,7 @@ type scanOptions struct {
+ 	StoreResponseDirectory string
+ 	RequestURI             string
+ 	RequestBody            string
++	OutputCustomRegex      string
+ 	VHost                  bool
+ 	OutputTitle            bool
+ 	OutputStatusCode       bool
+@@ -111,6 +112,7 @@ type Options struct {
+ 	NoFallback                bool
+ 	protocol                  string
+ 	ShowStatistics            bool
++	CustomRegex               string
+ }
+ 
+ // ParseOptions parses the command line options for application
+@@ -123,6 +125,7 @@ func ParseOptions() *Options {
+ 	flag.StringVar(&options.Output, "o", "", "File to write output to (optional)")
+ 	flag.BoolVar(&options.VHost, "vhost", false, "Check for VHOSTs")
+ 	flag.BoolVar(&options.ExtractTitle, "title", false, "Extracts title")
++	flag.StringVar(&options.CustomRegex, "custom-regex", "", "Extracts information by custom regex")
+ 	flag.BoolVar(&options.StatusCode, "status-code", false, "Extracts status code")
+ 	flag.BoolVar(&options.Location, "location", false, "Extracts location header")
+ 	flag.Var(&options.CustomHeaders, "H", "Custom Header")
+diff --git a/internal/runner/runner.go b/internal/runner/runner.go
+index c390cb6..6d7eaff 100644
+--- a/internal/runner/runner.go
++++ b/internal/runner/runner.go
+@@ -127,6 +127,7 @@ func New(options *Options) (*Runner, error) {
+ 	}
+ 	runner.options.protocol = httpx.HTTPorHTTPS
+ 	scanopts.VHost = options.VHost
++	scanopts.OutputCustomRegex = options.CustomRegex
+ 	scanopts.OutputTitle = options.ExtractTitle
+ 	scanopts.OutputStatusCode = options.StatusCode
+ 	scanopts.OutputLocation = options.Location
+@@ -584,6 +585,17 @@ retry:
+ 		builder.WriteRune(']')
+ 	}
+ 
++	if len(scanopts.OutputCustomRegex) != 0 {
++		customRegexInfo := httpx.ExtractInfoByCustomRegex(resp, scanopts.OutputCustomRegex)
++		builder.WriteString(" [")
++		if !scanopts.OutputWithNoColor {
++			builder.WriteString(aurora.Cyan(customRegexInfo).String())
++		} else {
++			builder.WriteString(customRegexInfo)
++		}
++		builder.WriteRune(']')
++	}
++
+ 	serverHeader := resp.GetHeader("Server")
+ 	if scanopts.OutputServerHeader {
+ 		builder.WriteString(fmt.Sprintf(" [%s]", serverHeader))
